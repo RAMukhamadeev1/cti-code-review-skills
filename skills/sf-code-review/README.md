@@ -1,9 +1,9 @@
 <div align="center">
 
-<h1>&#128269; Code Review Skill</h1>
+<h1>&#128269; SF Code Review</h1>
 
 <p>
-  <strong>A modular code review skill for Claude Code, focused on JavaScript/TypeScript, Node.js, NestJS, Python, and Salesforce</strong>
+  <strong>An independent code review skill for Claude Code and Codex, focused on Salesforce and the JavaScript/TypeScript, Node.js, NestJS, and Python code around it</strong>
 </p>
 
 <p>
@@ -23,12 +23,13 @@
 
 ## What is this?
 
-**Code Review Skill** is a skill for [Claude Code](https://claude.ai/code). It gives Claude a fixed procedure for reviewing code:
+**SF Code Review** (`sf-code-review`) is a skill for [Claude Code](https://claude.ai/code) and Codex. It reviews a change in a separate agent with a clean context, so the session that wrote the code can't bias the review:
 
-1. Resolve exactly which change to review.
-2. Load only the guides that match the stack.
-3. Verify every finding against the code before reporting it.
-4. Report in a fixed format: a verdict, the scope, severity-ranked findings with `file:line`, impact, and fix, and open questions.
+1. Resolve exactly which change to review, and read what it claims to do.
+2. Split a large change by feature and review the slices in parallel, one fresh agent each.
+3. Run 16 review angles on every hunk, merge the candidates without dropping any, and sweep for gaps.
+4. Drop a finding only when the code refutes it; keep the rest with a confidence.
+5. Report in a fixed format: a verdict, the scope, severity-ranked findings with `file:line`, impact, fix, and confidence, open questions, and older problems outside the change.
 
 It covers **JavaScript, TypeScript, Node.js, NestJS, Python, and the Salesforce platform**: Apex, triggers, SOQL/SOSL, Lightning Web Components, Aura, Visualforce, Flows, and metadata.
 
@@ -36,12 +37,15 @@ It covers **JavaScript, TypeScript, Node.js, NestJS, Python, and the Salesforce 
 
 ## &#10024; Key Features
 
-- **Checklist-first loading.** Only SKILL.md (~160 lines) loads when the skill activates. Each guide opens with a review checklist that doubles as its table of contents. Claude reads the checklists first and opens only the sections the diff touches. For example, an Apex trigger review starts from about 3.7k tokens of checklists, instead of about 49k tokens for the full guides.
-- **An agent's procedure, not a human's.** A six-step workflow: resolve target → triage → load guides → review → verify → report. There are no time budgets, praise quotas, or "ask to split" steps.
-- **Fixed output format.** Every review has a verdict, a scope line, numbered findings (severity, `path:line`, the defect stated as fact, impact, fix), and a Questions section for what a static review can't settle.
-- **False-positive control.** Every finding is verified before it's reported. The review reads each hunk's enclosing function or element, not the whole file, and reports only the changed lines; an older problem gets in, tagged "(pre-existing)", only when the change makes it reachable or worse. Anything a linter or compiler already enforces is skipped, and every absolute rule in the guides lists its legitimate exceptions.
+- **Independent by design.** The skill runs as a forked subagent (`context: fork`) that never sees the conversation that wrote the code. Where a client can't fork (Codex, a direct read of SKILL.md), the skill hands the review to a fresh agent, or says `independent: no` in the report.
+- **Recall first, then proof.** Sixteen angles (line by line, removed behavior, callers and callees, intent and parity, tests, data access, limits, async, metadata, conventions, and more) each surface candidates; none suppresses another. A gap sweep looks only for what the list lacks. Verification drops a candidate only with a quoted guard at `file:line`.
+- **Scales with the change.** A small change gets one fresh agent. A large or multi-repo change is split by feature (an entry point with its callees, tests, and metadata), each slice gets its own fresh agent, and a blind verifier checks the blocking and important findings.
+- **Checklist-first loading.** Only SKILL.md (~150 lines) loads when the skill activates. Each guide opens with a review checklist that doubles as its table of contents. Claude reads the checklists first and opens only the sections the diff touches. For example, an Apex trigger review starts from about 3.7k tokens of checklists, instead of about 49k tokens for the full guides.
+- **An agent's procedure, not a human's.** An eight-step workflow: resolve target → gather context → plan the passes → load guides → find candidates → merge and sweep → verify → report. There are no time budgets, praise quotas, or "ask to split" steps.
+- **Fixed output format.** Every review has a verdict, a scope line (with `independent` and `parallel`), numbered findings (severity, `path:line`, the defect stated as fact, impact, fix, confidence), Questions for facts outside the repository, and Outside this change for older problems the change doesn't touch.
+- **Focused on the change.** The review reads each hunk's enclosing function or element, not the whole file, then what the angles point to: callers, mirrored code, rule files, object metadata, and the removed code. Findings cover the changed lines; an older problem is a finding, tagged "(pre-existing)", only when the change makes it reachable or worse. Anything a linter or compiler already enforces is skipped, and every absolute rule in the guides lists its legitimate exceptions.
 - **Salesforce Review Path.** It detects Salesforce DX changes and routes each file type to its guide. It also traces entry points, counts governor limits at 200-record bulk volume, checks sharing and CRUD/FLS per API version, and looks for automation overlap. That includes the API 67.0 defaults, under which trigger bodies run in user mode too.
-- **Static and safe.** The skill pre-approves only read-only `git` and `gh pr` commands and its own analyzer, with no WebFetch. Reviewed code, comments, and PR text are treated as data, never as instructions. Salesforce reviews never deploy, run Apex or tests, or read org data.
+- **Static and safe.** The skill pre-approves only read-only `git`, `gh pr`, and `gh issue view` commands and its own analyzer, with no WebFetch. Reviewed code, comments, and PR text are treated as data, never as instructions. Salesforce reviews never deploy, run Apex or tests, or read org data.
 - **Robust analyzer.** `scripts/pr-analyzer.py` still reads diffs produced under `color.ui=always`, `diff.mnemonicPrefix`, or `diff.noprefix`. It ignores lockfiles, snapshots, and minified files when it sizes a change or looks for missing tests. It also flags Salesforce risks such as renames, FlowDefinitions, and apiVersion bumps on classes and triggers.
 
 ---
@@ -195,25 +199,34 @@ It covers **JavaScript, TypeScript, Node.js, NestJS, Python, and the Salesforce 
 ## &#128260; The Review Workflow
 
 ```
-1. Resolve the target      PR (gh pr view/diff), branch, or uncommitted work
+   (a fresh agent with a clean context runs every step)
+
+1. Resolve the target      PR, branch, commit range, several repos, or uncommitted work
           |
           v
-2. Triage                  large diffs: pr-analyzer.py -> risk factors + guides to load
+2. Gather context          PR and issue text, commit messages, CLAUDE.md / AGENTS.md, sfdx-project.json
           |
           v
-3. Load guides             each guide's Review Checklist first, then only matching sections
+3. Plan the passes         small: review alone · large: one fresh agent per feature slice, in parallel
           |
           v
-4. Review                  correctness, security, performance and limits, errors, tests, reuse
+4. Load guides             each guide's Review Checklist first, then only matching sections
           |
           v
-5. Verify                  every candidate finding against the code; unconfirmed -> Questions
+5. Find candidates         16 angles per hunk, up to 8 candidates each; read callers, mirrored code, metadata
           |
           v
-6. Report                  verdict · scope · findings (severity, file:line, impact, fix) · questions
+6. Merge and sweep         merge duplicates without dropping any; one pass only for what the list lacks
+          |
+          v
+7. Verify                  drop only with a quoted guard at file:line; blind verifier on split reviews
+          |
+          v
+8. Report                  verdict · scope · findings (severity, file:line, impact, fix, confidence)
+                           · questions · outside this change
 ```
 
-Salesforce changes add the **Salesforce Review Path** from `SKILL.md`:
+Salesforce changes add the **Salesforce Review Path** from `SKILL.md` and the **Salesforce Investigation** from `assets/review-angles.md`:
 
 - load the platform guide first and route each file type to its guide;
 - trace entry points and count governor limits at bulk volume;
@@ -229,7 +242,7 @@ Salesforce changes add the **Salesforce Review Path** from `SKILL.md`:
 |-------|---------|
 | &#128308; `blocking` | Must fix before merge: wrong results, data loss, a security hole, or a limit breach at realistic volume |
 | &#128993; `important` | Should fix; discuss if you disagree |
-| &#128994; `nit` | Optional polish; at most five per review |
+| &#128994; `nit` | Optional polish |
 | &#128161; `suggestion` | An alternative worth considering, not a defect |
 
 Verdict: any blocking finding → Request changes; otherwise any important finding → Comment; otherwise Approve. Default severities for common Salesforce findings (SOQL in loops, missing CRUD/FLS, XSS escape hatches, recursion guards, permission over-grants, and more) are in [`reference/salesforce/platform.md`](reference/salesforce/platform.md#severity-calibration).
@@ -239,107 +252,111 @@ Verdict: any blocking finding → Request changes; otherwise any important findi
 ## &#128193; Repository Structure
 
 ```
-code-review-skill/
+cti-code-review-skills/
 |
-+-- SKILL.md                              # Core skill - loaded on activation (~160 lines)
-+-- README.md
++-- README.md                             # The skills in this repository
 +-- LICENSE                               # MIT (upstream notice kept)
-+-- index.html                            # Landing page
-|
-+-- reference/                            # On-demand guides, each opening with its Review Checklist
-|   +-- javascript.md                     # Shared JS base: semantics, async, modules, DOM, testing
-|   +-- typescript.md                     # TypeScript type system, strict mode, typed linting
-|   +-- nodejs.md                         # Node.js runtime, streams, shutdown, Express, security
-|   +-- nestjs.md                         # NestJS DI, guards, interceptors, DTOs, lifecycle
-|   +-- python.md                         # Python 3.11-3.14: flag/don't-flag table, asyncio, pitfalls
-|   +-- architecture-review-guide.md      # Design fit, coupling, dependency direction, Salesforce layering
-|   +-- code-quality-universal.md         # Reuse audit, parameter sprawl, TOCTOU, no-op updates
-|   +-- performance-review-guide.md       # Core Web Vitals, queries, memory, caching, governor limits
-|   +-- security-review-guide.md          # Security index for all stacks
-|   +-- common-bugs-checklist.md          # Stack-specific bug patterns
-|   +-- code-review-best-practices.md     # For human reviewers and teams: communication, process
-|
-+-- reference/salesforce/                 # Salesforce guides (platform.md first)
-|   +-- platform.md                       # Limits, transactions, security model, API versions, severity
-|   +-- apex.md                           # Bulkification, sharing/user mode, async, callouts, tests
-|   +-- apex-triggers.md                  # Trigger architecture, chunks, recursion, events and CDC
-|   +-- soql-sosl.md                      # Injection, access mode, selectivity, pagination
-|   +-- lwc.md                            # Reactivity, LDS/wire, Apex contract, LWS, Jest
-|   +-- aura.md                           # Server actions, events, security, migration to LWC
-|   +-- visualforce.md                    # Encoding, CSRF, controller security, view state
-|   +-- flows.md                          # Flow types, entry conditions, bulk safety, fault paths
-|   +-- metadata.md                       # Permissions, sharing, schema, credentials, deployment
-|
-+-- reference/cross-cutting/              # Language-agnostic cross-cutting patterns
-|   +-- sql-injection-prevention.md       # Parameterized queries and identifiers: Python, Node.js
-|   +-- xss-prevention.md                 # Output encoding, CSP, framework escape hatches
-|   +-- n-plus-one-queries.md             # SQLAlchemy, Prisma, TypeORM, DataLoader, SOQL in loops
-|   +-- error-handling-principles.md      # Python, TypeScript, Apex
-|   +-- async-concurrency-patterns.md     # Event loop, cancellation, backpressure, async Apex
-|
-+-- assets/
-|   +-- review-checklist.md               # The line-by-line pass for any stack
-|   +-- pr-review-template.md             # A complete example review in the output format
-|
-+-- scripts/
-    +-- pr-analyzer.py                    # PR triage; Salesforce-aware; suggests guides
-    +-- test_pr_analyzer.py               # Analyzer tests: parsing, git configs, scoring, report, CLI
-    +-- test_skill.py                     # SKILL.md contract, links, license, analyzer agreement
-    +-- test_guides.py                    # Guide structure, corrected facts, runnable examples
++-- docs/                                 # Implementation notes
++-- skills/
+    +-- sf-code-review/                   # This skill: install this folder
+        +-- SKILL.md                      # Core skill - the forked agent's prompt (~150 lines)
+        +-- README.md
+        +-- LICENSE                       # A copy, so every install carries it
+        +-- index.html                    # Landing page
+        |
+        +-- reference/                    # On-demand guides, each opening with its Review Checklist
+        |   +-- javascript.md             # Shared JS base: semantics, async, modules, DOM, testing
+        |   +-- typescript.md             # TypeScript type system, strict mode, typed linting
+        |   +-- nodejs.md                 # Node.js runtime, streams, shutdown, Express, security
+        |   +-- nestjs.md                 # NestJS DI, guards, interceptors, DTOs, lifecycle
+        |   +-- python.md                 # Python 3.11-3.14: flag/don't-flag table, asyncio, pitfalls
+        |   +-- architecture-review-guide.md  # Design fit, coupling, dependency direction, Salesforce layering
+        |   +-- code-quality-universal.md # Reuse audit, parameter sprawl, TOCTOU, no-op updates
+        |   +-- performance-review-guide.md   # Core Web Vitals, queries, memory, caching, governor limits
+        |   +-- security-review-guide.md  # Security index for all stacks
+        |   +-- common-bugs-checklist.md  # Stack-specific bug patterns
+        |   +-- code-review-best-practices.md # For human reviewers and teams: communication, process
+        |
+        +-- reference/salesforce/         # Salesforce guides (platform.md first)
+        |   +-- platform.md               # Limits, transactions, security model, API versions, severity
+        |   +-- apex.md                   # Bulkification, sharing/user mode, async, callouts, tests
+        |   +-- apex-triggers.md          # Trigger architecture, chunks, recursion, events and CDC
+        |   +-- soql-sosl.md              # Injection, access mode, selectivity, pagination
+        |   +-- lwc.md                    # Reactivity, LDS/wire, Apex contract, LWS, Jest
+        |   +-- aura.md                   # Server actions, events, security, migration to LWC
+        |   +-- visualforce.md            # Encoding, CSRF, controller security, view state
+        |   +-- flows.md                  # Flow types, entry conditions, bulk safety, fault paths
+        |   +-- metadata.md               # Permissions, sharing, schema, credentials, deployment
+        |
+        +-- reference/cross-cutting/      # Language-agnostic cross-cutting patterns
+        |   +-- sql-injection-prevention.md   # Parameterized queries and identifiers: Python, Node.js
+        |   +-- xss-prevention.md         # Output encoding, CSP, framework escape hatches
+        |   +-- n-plus-one-queries.md     # SQLAlchemy, Prisma, TypeORM, DataLoader, SOQL in loops
+        |   +-- error-handling-principles.md  # Python, TypeScript, Apex
+        |   +-- async-concurrency-patterns.md # Event loop, cancellation, backpressure, async Apex
+        |
+        +-- assets/
+        |   +-- review-angles.md          # The 16 angles, the gap sweep, the Salesforce Investigation
+        |   +-- reviewer-brief.md         # Prompts for the slice reviewer and the blind verifier
+        |   +-- review-checklist.md       # The line-by-line pass for any stack
+        |   +-- pr-review-template.md     # A complete example review in the output format
+        |
+        +-- scripts/
+            +-- pr-analyzer.py            # PR triage; Salesforce-aware; suggests guides
+            +-- test_pr_analyzer.py       # Analyzer tests: parsing, git configs, scoring, report, CLI
+            +-- test_skill.py             # SKILL.md contract, briefs, links, license, analyzer agreement
+            +-- test_guides.py            # Guide structure, corrected facts, runnable examples
 ```
 
 ---
 
 ## &#128640; Installation
 
-**Install with `npx skills` (Cursor, Claude Code, Codex, OpenCode, and other agents):**
+**Install with `npx skills` (Claude Code, Codex, Cursor, OpenCode, and other agents):**
 
 ```bash
-npx skills add RAMukhamadeev1/cti-code-review-skill
+npx skills add RAMukhamadeev1/cti-code-review-skills --skill sf-code-review
 ```
 
-The skills CLI finds `SKILL.md` at the repo root. Do not nest this skill under `skills/`.
-
-**Or clone into the Claude Code skills directory:**
+**Or clone the repository and link the skill folder:**
 
 ```bash
-# macOS / Linux
-git clone https://github.com/RAMukhamadeev1/cti-code-review-skill.git ~/.claude/skills/code-review-skill
+git clone https://github.com/RAMukhamadeev1/cti-code-review-skills.git ~/src/cti-code-review-skills
 
-# Windows (PowerShell)
-git clone https://github.com/RAMukhamadeev1/cti-code-review-skill.git "$env:USERPROFILE\.claude\skills\code-review-skill"
+# Claude Code
+ln -s ~/src/cti-code-review-skills/skills/sf-code-review ~/.claude/skills/sf-code-review
+
+# Codex
+ln -s ~/src/cti-code-review-skills/skills/sf-code-review ~/.agents/skills/sf-code-review
 ```
 
-**Or link a local checkout:**
-
-```bash
-ln -s /path/to/this/repo ~/.claude/skills/code-review-skill
-```
+With a custom Claude Code config folder (`CLAUDE_CONFIG_DIR`), link the skill into its `skills/` folder too. A `git pull` updates every link at once.
 
 **Or add to an existing plugin:**
 
 ```bash
-cp -r code-review-skill ~/.claude/plugins/your-plugin/skills/code-review/
+cp -r skills/sf-code-review ~/.claude/plugins/your-plugin/skills/
 ```
 
 ---
 
 ## &#128161; Usage
 
-Once installed, activate the skill in your Claude Code session:
+Once installed, ask for a review in your session:
 
 ```
-Use code-review-skill to review this PR
+Use sf-code-review to review this PR
 ```
 
-Or run it as `/code-review-skill`, optionally with a target such as a PR number or a branch.
+Or run it as `/sf-code-review`, optionally with a target: a PR number, a branch, a commit range `base...head`, or `repo=<path>:<base>...<head>` pairs for a change across several repositories, plus an issue key or a spec path. In Claude Code the review runs in a forked agent and its report comes back to your conversation; relay it as it is.
 
 **Example prompts:**
 
 | Prompt | What happens |
 |--------|-------------|
-| `Use code-review-skill to review PR 42` | `gh pr view` / `gh pr diff`, then the matching guides and the output format |
+| `Use sf-code-review to review PR 42` | `gh pr view` / `gh pr diff`, the linked issue, then the matching guides and the output format |
 | `Review my uncommitted changes` | `git diff HEAD` plus untracked files from `git status --porcelain` |
+| `/sf-code-review repo=~/src/crm:main...feature/orders repo=~/src/crm-eu:main...feature/orders` | one review across two repositories, split by feature, one fresh agent per slice |
 | `Review this Apex trigger` | platform.md + apex-triggers.md + apex.md checklists: one trigger per object, 200-record chunks, recursion, user mode at API 67.0+ |
 | `Review this Lightning Web Component` | lwc.md + javascript.md: reactivity, LDS/wire, the Apex contract, XSS, cleanup |
 | `Security review of this Visualforce page` | visualforce.md + platform.md: encoding, CSRF, controller sharing, open redirects |
@@ -348,7 +365,9 @@ Or run it as `/code-review-skill`, optionally with a target such as a PR number 
 | `Review this NestJS module` | nestjs.md + typescript.md + javascript.md: DI, guards, DTO validation, lifecycle |
 | `Review this Python module` | python.md: version-aware flag/don't-flag rules, asyncio, pitfalls |
 
-For large diffs, the bundled analyzer triages size and risk and prints which guides to load:
+A review across several repositories reads files outside the working directory: start Claude Code with `--add-dir <path>` for each other repository, or approve the reads when asked.
+
+For large diffs, the bundled analyzer triages size and risk and prints which guides to load (run it from the skill folder):
 
 ```bash
 git diff --no-color --default-prefix main...HEAD | python3 scripts/pr-analyzer.py
@@ -414,10 +433,11 @@ Contributions are welcome. Keep new content consistent with the existing guides:
 - Keep each guide under 45,000 characters and its `## References` list to at most five links.
 - Use only the four severity labels. Salesforce defaults live in the platform guide's severity table.
 - Give each topic one owner file and link to it from the others instead of repeating it. Express searches as Grep patterns, not shell pipelines.
-- Register new guides in `SKILL.md`, this README, and `index.html`.
+- Register new guides in `SKILL.md`, this README, and `index.html`. Review angles live in `assets/review-angles.md`; a new angle also goes on the `Angles:` line in `SKILL.md`.
 - Write in English.
-- Run the tests (standard library only): `python3 -m unittest discover -s scripts`. They check every link and anchor, the SKILL.md contract, the guide structure, corrected facts, and the runnable examples (the Node.js example test needs `node`). They also check that `SKILL.md` and the analyzer agree.
-- Keep `scripts/pr-analyzer.py` at 100% line and branch coverage: `python3 -m coverage run -m unittest discover -s scripts && python3 -m coverage report` (needs `pip install coverage`; settings in `.coveragerc`).
+- Keep `SKILL.md` under 15,000 characters: after auto-compaction Claude Code re-attaches only the first 5,000 tokens of a skill.
+- Run the tests from the repository root (standard library only): `python3 -m unittest discover -s skills/sf-code-review/scripts`. They check every link and anchor, the SKILL.md contract, the guide structure, corrected facts, and the runnable examples (the Node.js example test needs `node`). They also check that `SKILL.md` and the analyzer agree.
+- Keep `scripts/pr-analyzer.py` at 100% line and branch coverage: `python3 -m coverage run -m unittest discover -s skills/sf-code-review/scripts && python3 -m coverage report` (needs `pip install coverage`; settings in `.coveragerc`).
 
 ---
 

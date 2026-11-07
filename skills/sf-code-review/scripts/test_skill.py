@@ -8,6 +8,7 @@ names exist and are linked from SKILL.md, and the Salesforce files SKILL.md
 routes are flagged by the analyzer and get the guides SKILL.md lists.
 """
 
+import configparser
 import functools
 import html
 import importlib.util
@@ -21,12 +22,33 @@ from urllib.parse import unquote
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL_ROOT = os.path.dirname(_HERE)
+SKILL_NAME = 'sf-code-review'
 SKILL_MD = os.path.join(SKILL_ROOT, 'SKILL.md')
 README = os.path.join(SKILL_ROOT, 'README.md')
 INDEX_HTML = os.path.join(SKILL_ROOT, 'index.html')
 LICENSE = os.path.join(SKILL_ROOT, 'LICENSE')
 PR_TEMPLATE = os.path.join(SKILL_ROOT, 'assets', 'pr-review-template.md')
-REPOSITORY = 'RAMukhamadeev1/cti-code-review-skill'
+ANGLES = os.path.join(SKILL_ROOT, 'assets', 'review-angles.md')
+BRIEF = os.path.join(SKILL_ROOT, 'assets', 'reviewer-brief.md')
+REPOSITORY = 'RAMukhamadeev1/cti-code-review-skills'
+
+# The repository holds one folder per skill under skills/. An installed copy of
+# the skill has no repository root, so the tests that need it are skipped there.
+_SKILLS_DIR = os.path.dirname(SKILL_ROOT)
+REPO_ROOT = (os.path.dirname(_SKILLS_DIR)
+             if os.path.basename(_SKILLS_DIR) == 'skills'
+             and os.path.isfile(os.path.join(os.path.dirname(_SKILLS_DIR), 'README.md'))
+             else None)
+needs_repo_root = unittest.skipUnless(REPO_ROOT, 'runs only in the repository checkout')
+
+# Frontmatter keys Claude Code documents for SKILL.md that this skill uses
+KNOWN_FRONTMATTER_KEYS = frozenset({
+    'name', 'description', 'argument-hint', 'allowed-tools',
+    'context', 'agent', 'background', 'effort',
+})
+
+# The old name lives on only in the upstream project's URL
+_OLD_NAME_RE = re.compile(r'(?<!awesome-skills/)code-review-skill(?!s)')
 
 # After auto-compaction Claude Code re-attaches only the first 5,000 tokens of a
 # skill; at roughly 3.5 characters per token this keeps all of SKILL.md.
@@ -283,17 +305,36 @@ class FrontmatterTest(unittest.TestCase):
     def setUpClass(cls):
         cls.fields = parse_frontmatter(read(SKILL_MD))
 
-    def test_name(self):
+    def test_name_is_sf_code_review(self):
         name = self.fields['name']
+        self.assertEqual(name, SKILL_NAME)
+        self.assertEqual(os.path.basename(SKILL_ROOT), name)
         self.assertRegex(name, r'^[a-z0-9]+(?:-[a-z0-9]+)*$')
-        self.assertLessEqual(len(name), 64)
         self.assertNotRegex(name, r'anthropic|claude')
 
-    def test_install_directory_matches_name(self):
-        # A skill's directory name should match its name
-        directories = re.findall(r'\.claude[/\\]skills[/\\]([\w-]+)', read(README))
-        self.assertTrue(directories)
-        self.assertEqual(set(directories), {self.fields['name']})
+    def test_frontmatter_keys_are_known(self):
+        # Claude Code ignores an unknown key without an error, so a typo such as
+        # "contex: fork" would silently run the review in the author's context.
+        self.assertLessEqual(set(self.fields), KNOWN_FRONTMATTER_KEYS)
+
+    def test_runs_in_a_blocking_fork(self):
+        # The review runs in a fresh subagent that never sees the conversation
+        # that wrote the code, and the invoking turn waits for its report.
+        self.assertEqual(self.fields['context'], 'fork')
+        self.assertEqual(self.fields['agent'], 'general-purpose')
+        self.assertEqual(self.fields['background'], 'false')
+        self.assertEqual(self.fields['effort'], 'xhigh')
+        self.assertNotIn('model', self.fields)
+
+    def test_install_paths_match_name(self):
+        # Claude Code (.claude/skills) and Codex (.agents/skills) find a skill by
+        # its folder, which must carry the skill's name.
+        text = read(README)
+        claude = re.findall(r'\.claude[/\\]skills[/\\]([\w-]+)', text)
+        codex = re.findall(r'\.agents[/\\]skills[/\\]([\w-]+)', text)
+        self.assertTrue(claude)
+        self.assertTrue(codex)
+        self.assertEqual(set(claude) | set(codex), {SKILL_NAME})
 
     def test_description(self):
         description = self.fields['description'].strip()
@@ -306,7 +347,8 @@ class FrontmatterTest(unittest.TestCase):
         # the skill covers and when to use it. Rules live in the body.
         description = ' '.join(self.fields['description'].split())
         self.assertLessEqual(len(description), 700)
-        self.assertTrue(description.startswith('Code review for'), description)
+        self.assertTrue(description.startswith('Code review for Salesforce'), description)
+        self.assertRegex(description, r'(?i)separate agent')
         for phrase in ('mentoring', 'never deploy', 'setting review standards'):
             self.assertNotIn(phrase, description)
 
@@ -314,18 +356,20 @@ class FrontmatterTest(unittest.TestCase):
         # Static review only: read-only tools, read-only git and gh, and the
         # bundled analyzer; never sf/sfdx, a general shell, or unscoped WebFetch
         # (reviewed code is untrusted input, so no pre-approved exfiltration path).
+        # "git -C <repo>" reads a second repository of a multi-repo review.
         allowed = self.fields['allowed-tools']
         analyzer = 'Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/pr-analyzer.py *)'
         for required in (analyzer, 'Bash(gh pr view *)', 'Bash(gh pr diff *)',
-                         'Bash(git merge-base *)'):
+                         'Bash(git merge-base *)', 'Bash(git -C * diff *)',
+                         'Bash(git -C * show *)', 'Bash(gh issue view *)'):
             self.assertIn(required, allowed)
         for tool in allowed:
             with self.subTest(tool=tool):
                 self.assertTrue(
                     tool in {'Read', 'Grep', 'Glob', analyzer}
-                    or re.fullmatch(r'Bash\(git (?:diff|log|show|status|merge-base|rev-parse'
-                                    r'|blame|ls-files) \*\)', tool)
-                    or re.fullmatch(r'Bash\(gh pr (?:view|diff|checks) \*\)', tool),
+                    or re.fullmatch(r'Bash\(git (?:-C \* )?(?:diff|log|show|status|merge-base'
+                                    r'|rev-parse|blame|ls-files) \*\)', tool)
+                    or re.fullmatch(r'Bash\(gh (?:pr (?:view|diff|checks)|issue view) \*\)', tool),
                     tool)
                 self.assertFalse(tool.startswith('WebFetch'), tool)
 
@@ -363,6 +407,124 @@ class SkillBodyTest(unittest.TestCase):
         self.assertRegex(self.text, r'(?i)as data, not (?:as )?instructions')
         self.assertRegex(self.text, r'(?i)verify each (?:candidate )?finding')
 
+    def body(self):
+        """SKILL.md without its frontmatter."""
+        return self.text.split('\n---\n', 1)[1]
+
+    def test_body_opens_with_target_and_skill_dir(self):
+        # A forked review sees only this file: the target and the skill folder
+        # must be in it, ahead of every section.
+        intro = self.body().split('\n## ', 1)[0]
+        self.assertIn('\nReview target: $ARGUMENTS\n', intro)
+        self.assertIn('\nSkill folder: ${CLAUDE_SKILL_DIR}\n', intro)
+        self.assertEqual(self.text.count('$ARGUMENTS'), 1)
+
+    def test_unexpanded_placeholders_have_a_fallback(self):
+        # Codex and a direct read of the file leave the placeholders as typed.
+        self.assertRegex(self.text, r"still shows a `\$` placeholder.{0,120}"
+                                    r"folder of this SKILL\.md")
+
+    def test_independence_rule(self):
+        rule = self.line_starting('- **Independent.**')
+        for phrase in ('began with this skill', 'You are the delegate; do not delegate.',
+                       'fresh agent', 'unchanged', '`independent: no`'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, rule)
+
+    def test_claims_in_the_request_are_unverified(self):
+        rule = self.line_starting('- **Claims are context.**')
+        self.assertRegex(rule, r'(?i)unverified.{0,60}never evidence')
+
+    def test_empty_target_stops(self):
+        rule = self.line_starting('- No target given:')
+        self.assertIn('`No target: nothing to review`', rule)
+        self.assertIn('Never approve an empty diff.', rule)
+
+    def test_multi_repo_and_commit_range_targets(self):
+        self.assertIn('`repo=<path>:<base>...<head>`', self.line_starting('- Several repositories:'))
+        self.assertIn('`git diff --no-color --default-prefix <from> <to>`',
+                      self.line_starting('- Commit range:'))
+
+    def test_context_includes_the_governing_rules(self):
+        step = self.line_starting('2. **Gather context.**')
+        for phrase in ('CLAUDE.md', 'AGENTS.md', 'gh issue view', 'sfdx-project.json'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, step)
+
+    def test_orchestration(self):
+        # Small changes stay in one fresh agent; large ones fan out to one fresh
+        # agent per feature slice, and degrade to a sequential pass without Agent.
+        step = self.line_starting('3. **Plan the passes.**')
+        for phrase in ('300', '10 files', 'by feature', 'exactly one slice', 'in parallel',
+                       '(assets/reviewer-brief.md)', '`effort: xhigh`', '`parallel: no`'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, step)
+
+    def test_every_angle_is_named_in_skill_md(self):
+        # A one-line list of every angle keeps a skipped angle visible.
+        angles = re.findall(r'^### (.+)$', read(ANGLES), re.MULTILINE)
+        self.assertGreaterEqual(len(angles), 16)
+        listed = self.line_starting('Angles:').lower()
+        for angle in angles:
+            with self.subTest(angle=angle):
+                self.assertIn(angle.lower(), listed)
+
+    def test_merge_does_not_drop_and_sweep_runs(self):
+        step = self.line_starting('6. **Merge and sweep.**')
+        self.assertRegex(step, r'(?i)without dropping')
+        self.assertIn('(assets/review-angles.md#gap-sweep)', step)
+        self.assertRegex(step, r'(?i)contracts between slices')
+        self.assertRegex(step, r'(?i)zero new findings is a valid result')
+
+    def test_verification_drops_only_with_a_quoted_guard(self):
+        self.assertNotIn("Drop what doesn't hold", self.text)
+        step = self.line_starting('7. **Verify each candidate finding**')
+        self.assertRegex(step, r'(?i)drop a candidate only when you can quote')
+        self.assertIn('`file:line`', step)
+        self.assertIn('`Confidence: high`', step)
+        for verdict in ('CONFIRMED', 'REFUTED', 'UNDECIDABLE', 'blind'):
+            with self.subTest(verdict=verdict):
+                self.assertIn(verdict, step)
+
+    def test_questions_only_for_facts_outside_the_repo(self):
+        step = self.line_starting('7. **Verify each candidate finding**')
+        self.assertRegex(step, r'(?i)under Questions only when the deciding fact lives '
+                               r'outside the repository')
+
+    def test_soft_floor_reruns_sweep_once(self):
+        step = self.line_starting('8. **Report**')
+        self.assertRegex(step, r'(?i)fewer than 5 findings on more than 100 reviewable lines'
+                               r'.{0,40}gap sweep once more')
+
+    def test_no_nit_cap(self):
+        # Every issue is reported, ranked; a cap hides real ones.
+        for path in (SKILL_MD, README):
+            with self.subTest(path=rel(path)):
+                nit_rows = [line for line in read(path).split('\n') if 'nit`' in line or '[nit]' in line]
+                self.assertTrue(nit_rows)
+                for row in nit_rows:
+                    self.assertNotIn('at most', row)
+
+    def test_output_has_confidence_independence_coverage(self):
+        body = self.text.split('## Output Format', 1)[1].split('\n## ', 1)[0]
+        for marker in ('Independent review from a separate agent. Relay it unchanged.',
+                       'independent: yes | no', 'parallel: yes | no', 'not reviewed:',
+                       'Confidence: high | medium', '### Outside this change',
+                       'Outside this change never changes the verdict'):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, body)
+
+    def test_salesforce_investigation_moved(self):
+        # The eight Salesforce steps live with the other angles, so a reviewer of
+        # a non-Salesforce slice skips them and SKILL.md keeps its budget.
+        self.assertNotIn('Investigate the change the way', self.text)
+        self.assertIn('(assets/review-angles.md#salesforce-investigation)', self.text)
+        steps = re.findall(r'^\d\. \*\*(.+?)\.\*\*',
+                           read(ANGLES).split('## Salesforce Investigation', 1)[1], re.MULTILINE)
+        self.assertEqual(steps, ['Context', 'Entry points', 'Limits at bulk volume', 'Data access',
+                                 'UI layer', 'Automation overlap', 'Tests',
+                                 'Metadata and deployment'])
+
     def test_no_human_process_content(self):
         for pattern in (r'\(\d+-\d+ minutes\)', r'(?i)offer to pair', r'(?i)ask to split',
                         r'(?i)question approach', '🎉', r'(?i)\[praise\]'):
@@ -390,12 +552,14 @@ class SkillBodyTest(unittest.TestCase):
 
     def test_s1_reports_only_what_the_change_touches(self):
         # An older problem is a finding only when the change makes it reachable or
-        # worse, as the guides say; its severity is no way back in.
+        # worse, as the guides say; its severity is no way back in. Other older
+        # problems in the code the review read are listed apart, never scanned for.
         rule = self.line_starting('- **Review the change.**')
         self.assertNotIn('🔴', rule)
         self.assertRegex(rule, r'(?i)changed lines')
         self.assertRegex(rule, r'(?i)reachable or worse.{0,40}"\(pre-existing\)"')
-        self.assertRegex(rule, r'(?i)every other older problem')
+        self.assertRegex(rule, r'(?i)other older problems.{0,80}"Outside this change"')
+        self.assertRegex(rule, r'(?i)never scan unchanged files')
 
     def test_s2_branch_diffs_use_three_dots(self):
         # Two dots also show what the target gained since the fork, reversed.
@@ -407,10 +571,21 @@ class SkillBodyTest(unittest.TestCase):
         self.assertIn('`origin/<target>...origin/<source>`', branch)
 
     def test_s2_review_reads_a_line_range_per_hunk(self):
-        review = self.line_starting('4. **Review.**')
+        review = self.line_starting('5. **Find candidates**')
         self.assertRegex(review, r'(?i)enclosing function or block.{0,40}line range')
         self.assertRegex(review, r'(?i)never the whole file')
         self.assertRegex(review, r'(?i)Flow, LWC, Aura.{0,60}element around the hunk')
+
+    def test_review_step_traces_callers_and_mirrors(self):
+        # Most real defects sit outside the hunk: in a caller, in the code the
+        # change copies, in a rule file, or in what the change removed.
+        self.assertNotIn('Follow callers only when', self.text)
+        review = self.line_starting('5. **Find candidates**')
+        for phrase in ('callers and callees', 'mirrors or claims parity with',
+                       'sibling branches', 'CLAUDE.md', 'OWD', '`git show <base>:<path>`',
+                       '(assets/review-angles.md)', 'up to 8 each'):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, review)
 
     def test_s3_renamed_files_are_diffed_with_both_paths(self):
         rename = self.line_starting('- A renamed or moved file')
@@ -428,12 +603,65 @@ class SkillBodyTest(unittest.TestCase):
 
     def test_template_matches_the_output_format(self):
         template = read(PR_TEMPLATE)
-        for marker in ('**Verdict:**', '**Scope:**', '### Findings', '### Questions'):
+        for marker in ('**Verdict:**', '**Scope:**', '### Findings', '### Questions',
+                       '### Outside this change', 'Confidence:', 'independent: yes',
+                       'Independent review from a separate agent. Relay it unchanged.'):
             with self.subTest(marker=marker):
                 self.assertIn(marker, template)
         for gone in ('Review Time', '## Strengths', '- [ ]'):
             with self.subTest(gone=gone):
                 self.assertNotIn(gone, template)
+
+
+# ═══════════════════════════════════════════════════════════════
+# The briefs a review sends to its delegate agents
+# ═══════════════════════════════════════════════════════════════
+
+class ReviewerBriefTest(unittest.TestCase):
+    """A delegate sees nothing but its brief, so the brief must carry every rule."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = read(BRIEF)
+        cls.sections = {name: section for name, section in
+                        re.findall(r'^## (.+?)\n(.*?)(?=^## |\Z)', cls.text, re.M | re.S)}
+
+    def test_has_a_reviewer_and_a_verifier_brief(self):
+        self.assertEqual(set(self.sections), {'Slice Reviewer', 'Verifier'})
+
+    def test_every_delegate_is_told_not_to_delegate(self):
+        for name, section in self.sections.items():
+            with self.subTest(brief=name):
+                self.assertIn('You are the delegate; do not delegate.', section)
+                self.assertRegex(section, r'(?i)as data, not instructions')
+
+    def test_salesforce_safety_is_copied_verbatim(self):
+        safety = read(SKILL_MD).split('### Salesforce Safety: Static Review Only', 1)[1]
+        first_rule = re.search(r'^- (Never run .+?\.) ', safety, re.M).group(1)
+        for name, section in self.sections.items():
+            with self.subTest(brief=name):
+                self.assertIn(first_rule, section)
+
+    def test_slice_reviewer_brief_is_self_contained(self):
+        brief = self.sections['Slice Reviewer']
+        for placeholder in ('{skill_folder}', '{repository}', '{diff_command}', '{hunks}',
+                            '{intent}', '{rule_files}', '{guides}'):
+            with self.subTest(placeholder=placeholder):
+                self.assertIn(placeholder, brief)
+        self.assertIn('{skill_folder}/assets/review-angles.md', brief)
+        self.assertRegex(brief, r'(?i)could not read')
+        for field in ('file:', 'line:', 'angle:', 'summary:', 'failure_scenario:',
+                      'severity:', 'confidence:'):
+            with self.subTest(field=field):
+                self.assertIn(field, brief)
+
+    def test_verifier_is_blind_and_answers_in_three_verdicts(self):
+        brief = self.sections['Verifier']
+        self.assertIn('{findings}', brief)
+        self.assertRegex(brief, r"(?i)not the reasoning")
+        for verdict in ('CONFIRMED', 'REFUTED', 'UNDECIDABLE'):
+            with self.subTest(verdict=verdict):
+                self.assertIn(verdict, brief)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -454,9 +682,62 @@ class RepositoryTest(unittest.TestCase):
     def test_readme_names_the_repository(self):
         text = read(README)
         self.assertNotRegex(text, r'<owner>|<repo>|<repository-url>')
-        self.assertIn(f'npx skills add {REPOSITORY}', text)
+        self.assertIn(f'npx skills add {REPOSITORY} --skill {SKILL_NAME}', text)
         self.assertIn(f'https://github.com/{REPOSITORY}.git', text)
         self.assertIn('LICENSE', text)
+        self.assertNotIn('Do not nest', text)
+
+    def test_old_name_is_gone(self):
+        files = [SKILL_MD, README, INDEX_HTML, os.path.join(_HERE, 'pr-analyzer.py')]
+        files += skill_files('.md')
+        if REPO_ROOT:
+            files.append(os.path.join(REPO_ROOT, 'README.md'))
+        for path in sorted(set(files)):
+            with self.subTest(path=path):
+                self.assertNotRegex(read(path), _OLD_NAME_RE)
+
+    @needs_repo_root
+    def test_skill_lives_under_skills_dir(self):
+        self.assertFalse(os.path.exists(os.path.join(REPO_ROOT, 'SKILL.md')))
+        self.assertEqual(rel(_SKILLS_DIR), '..')
+
+    @needs_repo_root
+    def test_license_copies_identical(self):
+        self.assertEqual(read(os.path.join(REPO_ROOT, 'LICENSE')), read(LICENSE))
+
+    @needs_repo_root
+    def test_root_readme_lists_every_skill(self):
+        text = read(os.path.join(REPO_ROOT, 'README.md'))
+        names = sorted(d for d in os.listdir(_SKILLS_DIR)
+                       if os.path.isfile(os.path.join(_SKILLS_DIR, d, 'SKILL.md')))
+        self.assertIn(SKILL_NAME, names)
+        for name in names:
+            with self.subTest(skill=name):
+                fields = parse_frontmatter(read(os.path.join(_SKILLS_DIR, name, 'SKILL.md')))
+                self.assertEqual(fields['name'], name)
+                self.assertIn(f'(skills/{name}/)', text)
+                self.assertIn(f'--skill {name}', text)
+
+    @needs_repo_root
+    def test_coveragerc_points_at_the_skill(self):
+        config = configparser.ConfigParser()
+        config.read(os.path.join(REPO_ROOT, '.coveragerc'))
+        source = config['run']['source']
+        self.assertEqual(os.path.normpath(os.path.join(REPO_ROOT, source)), _HERE)
+
+    @needs_repo_root
+    def test_test_commands_name_existing_paths(self):
+        # The test and coverage commands run from the repository root.
+        for path in (README, os.path.join(REPO_ROOT, 'README.md')):
+            commands = re.findall(r'unittest discover -s ([\w./-]+)', read(path))
+            with self.subTest(readme=path):
+                self.assertTrue(commands)
+                for directory in commands:
+                    self.assertTrue(os.path.isdir(os.path.join(REPO_ROOT, directory)), directory)
+
+    @needs_repo_root
+    def test_root_readme_links_resolve(self):
+        self.assertEqual(broken_links(os.path.join(REPO_ROOT, 'README.md')), [])
 
 
 # ═══════════════════════════════════════════════════════════════

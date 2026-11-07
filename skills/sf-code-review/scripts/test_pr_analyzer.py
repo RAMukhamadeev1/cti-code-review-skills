@@ -1885,8 +1885,8 @@ class GenerateSuggestionsTest(unittest.TestCase):
             self.assertNotIn(phrase, joined)
 
     def test_high_complexity_threshold(self):
-        high = ("High complexity: split the review by area (for example one pass per stack), "
-                "each with only its guides")
+        high = ("High complexity: split the review by feature: an entry point with its callees, "
+                "their tests, and their metadata in one slice, each slice with only its guides")
         files = [make_file('src/app.py')]
         self.assertNotIn(high, pr_analyzer.generate_suggestions(files, 0.7, []))
         self.assertEqual(pr_analyzer.generate_suggestions(files, 0.71, [])[0], high)
