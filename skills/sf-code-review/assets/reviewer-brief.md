@@ -1,6 +1,6 @@
 # Reviewer Brief
 
-A delegate agent sees nothing but its prompt. Fill in every `{placeholder}` and send the text block of one section as one agent's prompt, with `effort: xhigh`. Paste the slice's hunks inline: the delegate may not be allowed to run git, and a slice that reads nothing looks clean. Give paths as absolute paths.
+A delegate agent sees nothing but its prompt. Fill in every `{placeholder}` and send the text block of one section as one agent's prompt, with `effort: xhigh`, in the foreground (never `run_in_background`): wait for every answer before you merge or report. Paste the slice's hunks inline: the delegate may not be allowed to run git, and a slice that reads nothing looks clean. Give paths as absolute paths.
 
 ## Slice Reviewer
 

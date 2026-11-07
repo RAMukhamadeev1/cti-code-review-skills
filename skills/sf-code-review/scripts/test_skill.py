@@ -459,9 +459,16 @@ class SkillBodyTest(unittest.TestCase):
         # agent per feature slice, and degrade to a sequential pass without Agent.
         step = self.line_starting('3. **Plan the passes.**')
         for phrase in ('300', '10 files', 'by feature', 'exactly one slice', 'in parallel',
-                       '(assets/reviewer-brief.md)', '`effort: xhigh`', '`parallel: no`'):
+                       '(assets/reviewer-brief.md)', '`effort: xhigh`', '`parallel: no`',
+                       # A lead that also reviews a slice, or slices that are too big,
+                       # lost a third of the findings in a replay.
+                       'about 400 reviewable lines', 'review no slice yourself',
+                       # A background agent's answer arrives after the report is out.
+                       'in the foreground'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, step)
+        verify = self.line_starting('7. **Verify each candidate finding**')
+        self.assertIn('wait for its answers', verify)
 
     def test_every_angle_is_named_in_skill_md(self):
         # A one-line list of every angle keeps a skipped angle visible.
@@ -631,6 +638,11 @@ class ReviewerBriefTest(unittest.TestCase):
 
     def test_has_a_reviewer_and_a_verifier_brief(self):
         self.assertEqual(set(self.sections), {'Slice Reviewer', 'Verifier'})
+
+    def test_delegates_run_in_the_foreground(self):
+        intro = self.text.split('\n## ', 1)[0]
+        self.assertIn('in the foreground', intro)
+        self.assertIn('never `run_in_background`', intro)
 
     def test_every_delegate_is_told_not_to_delegate(self):
         for name, section in self.sections.items():
