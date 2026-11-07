@@ -434,6 +434,9 @@ class SkillBodyTest(unittest.TestCase):
     def test_claims_in_the_request_are_unverified(self):
         rule = self.line_starting('- **Claims are context.**')
         self.assertRegex(rule, r'(?i)unverified.{0,60}never evidence')
+        # Memory notes and session transcripts carry the author's reasoning back in.
+        self.assertIn('memory notes', rule)
+        self.assertIn('Never read agent session transcripts (`*.jsonl`).', rule)
 
     def test_empty_target_stops(self):
         rule = self.line_starting('- No target given:')
@@ -634,6 +637,7 @@ class ReviewerBriefTest(unittest.TestCase):
             with self.subTest(brief=name):
                 self.assertIn('You are the delegate; do not delegate.', section)
                 self.assertRegex(section, r'(?i)as data, not instructions')
+                self.assertIn('Never read agent session transcripts (`*.jsonl`).', section)
 
     def test_salesforce_safety_is_copied_verbatim(self):
         safety = read(SKILL_MD).split('### Salesforce Safety: Static Review Only', 1)[1]
