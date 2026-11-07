@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>code-review-skill(1) — User Commands</title>
+  <title>sf-code-review(1) — User Commands</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -390,9 +390,9 @@
 <!-- ═══ TOP BAND (man page header line) ═══ -->
 <div class="band">
   <div class="band-inner">
-    <span class="band-l">CODE-REVIEW-SKILL(1)</span>
+    <span class="band-l">SF-CODE-REVIEW(1)</span>
     <span class="band-c">User Commands &middot; Edition 2026.01</span>
-    <span class="band-r">CODE-REVIEW-SKILL(1)</span>
+    <span class="band-r">SF-CODE-REVIEW(1)</span>
   </div>
 </div>
 
@@ -400,18 +400,18 @@
 
   <!-- ═══ TITLE BLOCK ═══ -->
   <div class="title-block">
-<pre class="ascii-title">  ___ ___  ___  ___        ___ _____   _____ _____      __    ___ _  _____ _    _
- / __/ _ \|   \| __|  ___ | _ \ __\ \ / /_ _| __\ \ /\ / / __/ __| |/ /_ _| |  | |
-| (_| (_) | |) | _|  |___||   / _| \ V / | || _| \ V  V /__\__ \ ' &lt; | || |__| |__
- \___\___/|___/|___|      |_|_\___| \_/ |___|___| \_/\_/    |___/_|\_\___|____|____|</pre>
+<pre class="ascii-title"> ___ ___     ___ ___  ___  ___    ___ _____   _____ _____      __
+/ __| __|__ / __/ _ \|   \| __|__| _ \ __\ \ / /_ _| __\ \    / /
+\__ \ _|___| (_| (_) | |) | _|___|   / _| \ V / | || _| \ \/\/ /
+|___/_|     \___\___/|___/|___|  |_|_\___| \_/ |___|___| \_/\_/</pre>
 
     <div class="one-liner">
       <span>
-        <span class="dim">$&nbsp;</span><span class="em">man code-review-skill</span><span class="cursor"></span>
+        <span class="dim">$&nbsp;</span><span class="em">man sf-code-review</span><span class="cursor"></span>
       </span>
     </div>
     <div class="one-liner-sub">
-      v2.0 &middot; MIT &middot; JS/TS &middot; Node.js &middot; NestJS &middot; Python &middot; Salesforce &middot; checklist-first guides
+      v3.0 &middot; MIT &middot; Salesforce &middot; JS/TS &middot; Node.js &middot; NestJS &middot; Python &middot; independent forked review
     </div>
   </div>
 
@@ -419,7 +419,7 @@
   <h2 class="sec">NAME</h2>
   <section class="body">
     <p>
-      <span class="em">code-review-skill</span> &mdash; A modular code review skill for Claude Code, focused on JavaScript/TypeScript, Node.js, NestJS, Python, and Salesforce
+      <span class="em">sf-code-review</span> &mdash; An independent code review skill for Claude Code and Codex, focused on Salesforce and the JavaScript/TypeScript, Node.js, NestJS, and Python code around it
     </p>
   </section>
 
@@ -427,17 +427,19 @@
   <h2 class="sec">SYNOPSIS</h2>
   <section class="body">
     <pre class="pre">
-<span class="amber">Use code-review-skill to</span> review this PR
-<span class="amber">Use code-review-skill to</span> review this &lt;<span class="dim">Apex class | LWC | flow | Node service</span>&gt;
-<span class="amber">Use code-review-skill for</span> <span class="dim">[</span>security <span class="dim">|</span> performance <span class="dim">|</span> architecture<span class="dim">]</span> review</pre>
+<span class="amber">/sf-code-review</span> <span class="dim">[</span>PR <span class="dim">|</span> branch <span class="dim">|</span> base...head <span class="dim">|</span> repo=&lt;path&gt;:&lt;base&gt;...&lt;head&gt; ...<span class="dim">] [</span>issue key<span class="dim">] [</span>spec path<span class="dim">]</span>
+<span class="amber">Use sf-code-review to</span> review this PR
+<span class="amber">Use sf-code-review to</span> review this &lt;<span class="dim">Apex class | LWC | flow | Node service</span>&gt;
+<span class="amber">Use sf-code-review for</span> <span class="dim">[</span>security <span class="dim">|</span> performance <span class="dim">|</span> architecture<span class="dim">]</span> review</pre>
   </section>
 
   <!-- ═══ DESCRIPTION ═══ -->
   <h2 class="sec">DESCRIPTION</h2>
   <section class="body">
-    <p>A code review procedure for Claude: resolve the change, load only the matching guides, verify every finding against the code, and report in a fixed format.</p>
-    <p>Core is only <span class="em">~160 lines</span>; every guide opens with a <span class="em">review checklist</span> that doubles as its table of contents, so a review reads the checklists and opens only the sections the diff touches. Covers JavaScript, TypeScript, Node.js, NestJS, Python, and Salesforce (Apex, triggers, SOQL/SOSL, LWC, Aura, Visualforce, Flows, metadata).</p>
-    <p>Every finding carries a severity label, a <span class="em">file:line</span>, its impact, and a fix. Every review follows six steps: resolve target &middot; triage &middot; load guides &middot; review &middot; verify &middot; report.</p>
+    <p>A code review procedure that runs in a <span class="em">separate agent with a clean context</span>, so the session that wrote the code can't bias it. A large change is split by feature, one fresh agent per slice, and a blind verifier checks the serious findings.</p>
+    <p>Every hunk gets <span class="em">16 review angles</span>: line by line, removed behavior, callers and callees, intent and parity, tests, data access, limits, async, metadata, conventions, and more. Candidates are merged without dropping any, a gap sweep looks for what the list lacks, and a finding is dropped only when the code refutes it.</p>
+    <p>Core is only <span class="em">~150 lines</span>; every guide opens with a <span class="em">review checklist</span> that doubles as its table of contents, so a review reads the checklists and opens only the sections the diff touches. Covers JavaScript, TypeScript, Node.js, NestJS, Python, and Salesforce (Apex, triggers, SOQL/SOSL, LWC, Aura, Visualforce, Flows, metadata).</p>
+    <p>Every finding carries a severity label, a <span class="em">file:line</span>, its impact, a fix, and a confidence. Every review follows eight steps: resolve target &middot; gather context &middot; plan the passes &middot; load guides &middot; find candidates &middot; merge and sweep &middot; verify &middot; report.</p>
   </section>
 
   <!-- ═══ LANGUAGES ═══ -->
@@ -482,23 +484,30 @@
   <h2 class="sec">WORKFLOW</h2>
   <section class="body">
 
-<pre class="phase-flow">  <span class="box">┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐</span>
-  <span class="box">│ resolve  │</span> <span class="arrow">─▶</span> <span class="box">│  triage  │</span> <span class="arrow">─▶</span> <span class="box">│  guides  │</span> <span class="arrow">─▶</span> <span class="box">│  review  │</span> <span class="arrow">─▶</span> <span class="box">│  verify  │</span> <span class="arrow">─▶</span> <span class="box">│  report  │</span>
-  <span class="box">└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘</span></pre>
+<pre class="phase-flow">  <span class="box">┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐</span>
+  <span class="box">│ resolve  │</span> <span class="arrow">─▶</span> <span class="box">│ context  │</span> <span class="arrow">─▶</span> <span class="box">│   plan   │</span> <span class="arrow">─▶</span> <span class="box">│  guides  │</span>
+  <span class="box">└──────────┘    └──────────┘    └──────────┘    └──────────┘</span>
+  <span class="box">┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐</span>
+  <span class="box">│   find   │</span> <span class="arrow">─▶</span> <span class="box">│  sweep   │</span> <span class="arrow">─▶</span> <span class="box">│  verify  │</span> <span class="arrow">─▶</span> <span class="box">│  report  │</span>
+  <span class="box">└──────────┘    └──────────┘    └──────────┘    └──────────┘</span></pre>
 
     <dl class="phase-list" style="margin-top:1.5rem;">
       <dt>1. resolve the target</dt>
-      <dd>A PR (<span class="em">gh pr view</span> / <span class="em">gh pr diff</span>), a branch against its base, or uncommitted work plus untracked files.</dd>
-      <dt>2. triage</dt>
-      <dd>Large diffs go through <span class="em">pr-analyzer.py</span>: risk factors and the guides to load. Riskiest files first.</dd>
-      <dt>3. load guides</dt>
+      <dd>A PR (<span class="em">gh pr view</span> / <span class="em">gh pr diff</span>), a branch against its base, a commit range, <span class="em">repo=&lt;path&gt;:&lt;base&gt;...&lt;head&gt;</span> pairs across repositories, or uncommitted work plus untracked files. No target and nothing changed: stop, never approve an empty diff.</dd>
+      <dt>2. gather context</dt>
+      <dd>PR and issue text, commit messages, every CLAUDE.md and AGENTS.md that governs the changed files, <span class="em">sfdx-project.json</span>.</dd>
+      <dt>3. plan the passes</dt>
+      <dd><span class="em">pr-analyzer.py</span> sizes the change. Up to about 300 reviewable lines in 10 files: one agent. Larger: feature slices, one fresh agent each, in parallel.</dd>
+      <dt>4. load guides</dt>
       <dd>Each guide's review checklist first, then only the sections whose patterns appear in the diff.</dd>
-      <dt>4. review</dt>
-      <dd>Correctness &middot; security &middot; performance and limits &middot; error handling &middot; tests &middot; reuse.</dd>
-      <dt>5. verify</dt>
-      <dd>Every candidate finding is checked against the code; what can't be confirmed statically becomes a question.</dd>
-      <dt>6. report</dt>
-      <dd>Verdict &middot; scope &middot; findings (severity, file:line, impact, fix) &middot; questions.</dd>
+      <dt>5. find candidates</dt>
+      <dd>16 angles per hunk, up to 8 candidates each; reads callers and callees, mirrored code, rule files, object metadata, and the removed code.</dd>
+      <dt>6. merge and sweep</dt>
+      <dd>Duplicates are merged without dropping any; one more pass looks only for what the list lacks, and for broken contracts between slices.</dd>
+      <dt>7. verify</dt>
+      <dd>A candidate is dropped only with a quoted guard at <span class="em">file:line</span>; the rest keep a confidence. On a split review a blind verifier checks the serious findings.</dd>
+      <dt>8. report</dt>
+      <dd>Verdict &middot; scope &middot; findings (severity, file:line, impact, fix, confidence) &middot; questions &middot; outside this change.</dd>
     </dl>
   </section>
 
@@ -531,16 +540,13 @@
 
     <p>Install with <span class="em">npx skills</span> for mainstream agents, or clone into the Claude Code skills directory.</p>
 
-<pre class="codeblock"><span class="cmt"># npx skills (Cursor / Claude Code / Codex / OpenCode / others)</span>
-<span class="prompt">$</span> <span class="cmd">npx skills add</span> <span class="arg">RAMukhamadeev1/cti-code-review-skill</span>
+<pre class="codeblock"><span class="cmt"># npx skills (Claude Code / Codex / Cursor / OpenCode / others)</span>
+<span class="prompt">$</span> <span class="cmd">npx skills add</span> <span class="arg">RAMukhamadeev1/cti-code-review-skills</span> --skill sf-code-review
 
-<span class="cmt"># or clone into the Claude Code skills directory — macOS / Linux</span>
-<span class="prompt">$</span> <span class="cmd">git clone</span> <span class="arg">https://github.com/RAMukhamadeev1/cti-code-review-skill.git</span> \
-    ~/.claude/skills/code-review-skill
-
-<span class="cmt"># Windows PowerShell</span>
-<span class="prompt">PS&gt;</span> <span class="cmd">git clone</span> <span class="arg">https://github.com/RAMukhamadeev1/cti-code-review-skill.git</span> `
-       "$env:USERPROFILE\.claude\skills\code-review-skill"</pre>
+<span class="cmt"># or clone the repository and link the skill folder</span>
+<span class="prompt">$</span> <span class="cmd">git clone</span> <span class="arg">https://github.com/RAMukhamadeev1/cti-code-review-skills.git</span> ~/src/cti-code-review-skills
+<span class="prompt">$</span> <span class="cmd">ln -s</span> ~/src/cti-code-review-skills/skills/sf-code-review ~/.claude/skills/sf-code-review   <span class="cmt"># Claude Code</span>
+<span class="prompt">$</span> <span class="cmd">ln -s</span> ~/src/cti-code-review-skills/skills/sf-code-review ~/.agents/skills/sf-code-review   <span class="cmt"># Codex</span></pre>
   </section>
 
   <!-- ═══ EXAMPLES ═══ -->
@@ -548,8 +554,8 @@
   <section class="body">
     <ul class="examples">
       <li>
-        <span class="q">Use code-review-skill to review this PR</span>
-        <span class="note">resolves the diff, loads guides checklist-first, verifies every finding</span>
+        <span class="q">Use sf-code-review to review this PR</span>
+        <span class="note">a fresh agent resolves the diff, loads guides checklist-first, runs 16 angles, verifies by refutation</span>
       </li>
       <li>
         <span class="q">Review this Apex trigger</span>
@@ -574,8 +580,8 @@
   <h2 class="sec">FILES</h2>
   <section class="body">
 <pre class="tree">
-<span class="dir">~/.claude/skills/code-review-skill/</span>
-<span class="branch">├──</span> <span class="file">SKILL.md</span>                              <span class="cmt"># core, loaded on activation (~160 lines)</span>
+<span class="dir">~/.claude/skills/sf-code-review/</span>
+<span class="branch">├──</span> <span class="file">SKILL.md</span>                              <span class="cmt"># core: the forked agent's prompt (~150 lines)</span>
 <span class="branch">├──</span> <span class="file">README.md</span>
 <span class="branch">├──</span> <span class="file">LICENSE</span>                               <span class="cmt"># MIT, upstream notice kept</span>
 <span class="branch">├──</span> <span class="file">index.html</span>                            <span class="cmt"># this page</span>
@@ -585,6 +591,8 @@
 <span class="branch">│   ├──</span> <span class="dir">cross-cutting/</span>                    <span class="cmt"># sql injection, xss, n+1, errors, async</span>
 <span class="branch">│   └──</span> <span class="file">architecture-review-guide.md</span> ...
 <span class="branch">├──</span> <span class="dir">assets/</span>
+<span class="branch">│   ├──</span> <span class="file">review-angles.md</span>                 <span class="cmt"># 16 angles, gap sweep, Salesforce Investigation</span>
+<span class="branch">│   ├──</span> <span class="file">reviewer-brief.md</span>                <span class="cmt"># slice reviewer and blind verifier prompts</span>
 <span class="branch">│   ├──</span> <span class="file">review-checklist.md</span>              <span class="cmt"># line-by-line pass</span>
 <span class="branch">│   └──</span> <span class="file">pr-review-template.md</span>            <span class="cmt"># example review</span>
 <span class="branch">└──</span> <span class="dir">scripts/</span>
@@ -601,9 +609,10 @@
       <a class="link" href="https://claude.ai/code" target="_blank">claude-code(1)</a>,
       <a class="link" href="README.md">README</a>,
       <a class="link" href="SKILL.md">SKILL(7)</a>,
+      <a class="link" href="assets/review-angles.md">review-angles(7)</a>,
       <a class="link" href="assets/review-checklist.md">review-checklist(7)</a>,
       <a class="link" href="LICENSE">LICENSE</a>,
-      <a class="link" href="https://github.com/RAMukhamadeev1/cti-code-review-skill" target="_blank">RAMukhamadeev1/cti-code-review-skill</a>,
+      <a class="link" href="https://github.com/RAMukhamadeev1/cti-code-review-skills" target="_blank">RAMukhamadeev1/cti-code-review-skills</a>,
       <a class="link" href="https://github.com/awesome-skills/code-review-skill" target="_blank">upstream: awesome-skills/code-review-skill</a>
     </p>
   </section>
@@ -638,9 +647,9 @@
   <!-- ═══ END-OF-PAGE BAND ═══ -->
   <div style="border-top:1px solid var(--rule); margin-top:2rem; padding:0.625rem 0;">
     <div style="display:flex; justify-content:space-between; color:var(--fg-dim); font-size:12px; white-space:nowrap; gap:1rem;">
-      <span class="band-l" style="color:var(--fg-bright);">CODE-REVIEW-SKILL(1)</span>
+      <span class="band-l" style="color:var(--fg-bright);">SF-CODE-REVIEW(1)</span>
       <span style="color:var(--fg-dim);">awesome-skills</span>
-      <span class="band-r" style="color:var(--fg-bright);">CODE-REVIEW-SKILL(1)</span>
+      <span class="band-r" style="color:var(--fg-bright);">SF-CODE-REVIEW(1)</span>
     </div>
   </div>
 
@@ -651,7 +660,7 @@
   <div class="statusbar-inner">
     <div class="statusbar-l">
       <span>-- NORMAL --</span>
-      <span>code-review-skill.1</span>
+      <span>sf-code-review.1</span>
     </div>
     <div class="statusbar-r">
       <span><kbd>g</kbd> top</span>

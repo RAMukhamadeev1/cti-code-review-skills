@@ -1159,8 +1159,9 @@ def generate_suggestions(files: List[FileStats], complexity: float, risks: List[
                            "anything not reviewed under Scope in the review")
 
     if complexity > 0.7:
-        suggestions.append("High complexity: split the review by area (for example one pass "
-                           "per stack), each with only its guides")
+        suggestions.append("High complexity: split the review by feature: an entry point with "
+                           "its callees, their tests, and their metadata in one slice, each "
+                           "slice with only its guides")
 
     if _has_risk(risks, RISK_NO_TESTS):
         suggestions.append("No tests changed: check that the changed code paths are covered, "

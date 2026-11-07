@@ -1,10 +1,10 @@
-# Coverage for scripts/pr-analyzer.py (pip install coverage), from the repo root:
-#   python3 -m coverage run -m unittest discover -s scripts
+# Coverage for skills/sf-code-review/scripts/pr-analyzer.py (pip install coverage), from the repo root:
+#   python3 -m coverage run -m unittest discover -s skills/sf-code-review/scripts
 #   python3 -m coverage report
 [run]
 branch = True
-source = scripts
-omit = scripts/test_*.py
+source = skills/sf-code-review/scripts
+omit = */test_*.py
 
 [report]
 fail_under = 100
