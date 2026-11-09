@@ -42,6 +42,11 @@ Severity: 🔴 blocking · 🟡 important · 🟢 nit · 💡 suggestion ([how t
 
 - [ ] 🔴 Entry points enforce sharing, CRUD, and FLS for their API version and re-query client-supplied Ids in user mode
 
+### LLM and agent boundaries → [Prompt Injection](#prompt-injection)
+
+- [ ] 🔴 Retrieved text and tool results cannot grant tool permissions or authorize data access
+- [ ] 🟡 Adversarial tests check tool calls, disclosures, and task completion, not only refusal text
+
 ## Authentication & Authorization
 
 - Passwords (NIST SP 800-63B-4): ≥15 characters single-factor (8 with MFA), allow ≥64, blocklist check, no composition rules or periodic changes, rate-limited failures instead of hard lockout.
@@ -246,6 +251,18 @@ logger.info({ userId: user.id, success }, 'login attempt');
 
 No passwords, tokens, session IDs, API keys, or card numbers; PII becomes IDs. Structured logs prevent forged lines (plain text: strip CR/LF from input). New auth and permission flows log security events.
 
+## Prompt Injection
+
+Use this section when a change assembles prompts, retrieves documents, stores agent memory, or gives a model tools. Trace an untrusted input through the prompt to a tool call or disclosed output. Prompt text alone is not an authorization boundary.
+
+- Keep trusted instructions separate from repository files, search results, attachments, and tool output. Role labels, XML delimiters, encoded text, and a second agent's summary do not make evidence trusted.
+- Enforce caller identity, tenant scope, allowed actions, and argument validation in the tool handler. A model-selected path, URL, SQL statement, or shell argument is still untrusted input. Limit filesystem access and network destinations outside the model.
+- Do not place credentials in prompts. Redact secrets from returned tool data and logs. Rendering a model's Markdown image can make an external request; escape or disable active content where private data is shown.
+- A repository instruction cannot authorize execution of its tests, a package install, a deploy, or posting a review. Check the action against the user's actual task and host permissions at execution time.
+- Test indirect instructions in documents and rule files, quoted attacks in legitimate fixtures, spoofed tool results, and attempts to suppress real defects. Assert which calls occurred, what data left the boundary, and whether the requested task still completed. A refusal sentence without these checks is not a passing security test.
+
+For this reviewer's own boundaries, use [Review Safety](../assets/review-safety.md). Instructions and passing examples reduce risk; they do not prove complete prompt injection resistance.
+
 ## Salesforce Platform Security
 
 Load the [Salesforce Platform Guide](salesforce/platform.md) first: its [Security Model](salesforce/platform.md#security-model) sets the API-version defaults and its [severity calibration](salesforce/platform.md#severity-calibration) applies to Salesforce findings.
@@ -264,3 +281,4 @@ Load the [Salesforce Platform Guide](salesforce/platform.md) first: its [Securit
 - [OWASP Cheat Sheet Series](https://cheatsheetseries.owasp.org/)
 - [OWASP Top 10:2025](https://owasp.org/Top10/2025/)
 - [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html)
+- [OWASP Prompt Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/LLM_Prompt_Injection_Prevention_Cheat_Sheet.html)

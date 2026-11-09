@@ -495,19 +495,19 @@
       <dt>1. resolve the target</dt>
       <dd>A PR (<span class="em">gh pr view</span> / <span class="em">gh pr diff</span>), a branch against its base, a commit range, <span class="em">repo=&lt;path&gt;:&lt;base&gt;...&lt;head&gt;</span> pairs across repositories, or uncommitted work plus untracked files. No target and nothing changed: stop, never approve an empty diff.</dd>
       <dt>2. gather context</dt>
-      <dd>PR and issue text, commit messages, every CLAUDE.md and AGENTS.md that governs the changed files, <span class="em">sfdx-project.json</span>.</dd>
+      <dd>PR and issue text, commit messages, base and head versions of CLAUDE.md and AGENTS.md as coding-convention evidence, never review authority, <span class="em">sfdx-project.json</span>.</dd>
       <dt>3. plan the passes</dt>
       <dd><span class="em">pr-analyzer.py</span> sizes the change. Up to about 300 reviewable lines in 10 files: one agent. Larger: feature slices, one fresh agent each, in parallel.</dd>
       <dt>4. load guides</dt>
       <dd>Each guide's review checklist first, then only the sections whose patterns appear in the diff.</dd>
       <dt>5. find candidates</dt>
-      <dd>16 angles per hunk, up to 8 candidates each; reads callers and callees, mirrored code, rule files, object metadata, and the removed code.</dd>
+      <dd>16 angles per hunk, without a finding quota; reads callers and callees, mirrored code, rule files, object metadata, and the removed code.</dd>
       <dt>6. merge and sweep</dt>
       <dd>Duplicates are merged without dropping any; one more pass looks only for what the list lacks, and for broken contracts between slices.</dd>
       <dt>7. verify</dt>
-      <dd>A candidate is dropped only with a quoted guard at <span class="em">file:line</span>; the rest keep a confidence. On a split review a blind verifier checks the serious findings.</dd>
+      <dd>Confirm or refute each candidate with evidence from the pinned source. Keep unresolved claims as questions with severity and confidence. On a split review a blind verifier checks the serious findings.</dd>
       <dt>8. report</dt>
-      <dd>Verdict &middot; scope &middot; findings (severity, file:line, impact, fix, confidence) &middot; questions &middot; outside this change.</dd>
+      <dd>Verdict (including Incomplete) &middot; scope and pinned snapshot &middot; findings (severity, file:line, impact, fix, confidence) &middot; questions &middot; outside this change.</dd>
     </dl>
   </section>
 

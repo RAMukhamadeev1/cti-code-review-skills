@@ -250,24 +250,14 @@ async function processWithLimit<T, R>(
 
 Apex has no threads: each asynchronous job runs later as a separate transaction with its own limits. The pitfalls above map directly: a job per record floods the queue, an unobserved job fails silently, an unbounded chain never stops, and two transactions that update the same rows race.
 
-```apex
-public with sharing class InvoiceTriggerHandler {
-    // ❌ One job per record: a bulk insert hits the enqueue limit and floods the async queue
-    public static void afterInsertPerRecord(List<Invoice__c> invoices) {
-        for (Invoice__c inv : invoices) {
-            System.enqueueJob(new AccountBalanceJob(new Set<Id>{ inv.Account__c }, 1));
-        }
-    }
+The dispatch below is called once by the transaction owner after all invoice writes. It is not a trigger handler: triggers run again for each chunk and can re-enter. The owner must reserve an enqueue slot. For writes that can start from arbitrary triggers, use persisted pending records and the [transaction-level dispatcher](../salesforce/apex-triggers.md#keep-callouts-out-of-triggers-and-enqueue-once-per-transaction), with a scheduled sweep when no slot remains. A static guard around a job carrying only the first chunk's IDs loses later work.
 
-    // ✅ One job for all affected Accounts; cap the chain depth (production chains are otherwise unbounded)
-    public static void afterInsert(List<Invoice__c> invoices) {
-        Set<Id> accountIds = new Set<Id>();
-        for (Invoice__c inv : invoices) {
-            accountIds.add(inv.Account__c);
-        }
-        AsyncOptions options = new AsyncOptions(); // API 59.0+ / Winter '24
+```apex
+public with sharing class InvoiceBalanceDispatch {
+    public static void enqueueAfterAllWrites(Set<Id> affectedAccountIds) {
+        AsyncOptions options = new AsyncOptions();
         options.MaximumQueueableStackDepth = 5;
-        System.enqueueJob(new AccountBalanceJob(accountIds, 1), options);
+        System.enqueueJob(new AccountBalanceJob(affectedAccountIds, 1), options);
     }
 }
 

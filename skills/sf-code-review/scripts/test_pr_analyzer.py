@@ -190,9 +190,7 @@ class ParseDiffFilenameTest(unittest.TestCase):
         self.assertEqual([f.change_type for f in files], ['modified', 'renamed'])
         self.assertEqual((files[0].additions, files[0].deletions), (1, 1))
 
-    def test_unparsable_header_skips_the_file(self):
-        # A header that names no file has its lines dropped instead of being
-        # added to the previous file.
+    def test_unparsable_header_rejects_the_input(self):
         for header in ('diff --git', 'diff --git "a/x" "b/"'):
             with self.subTest(header=header):
                 diff = (
@@ -208,9 +206,8 @@ class ParseDiffFilenameTest(unittest.TestCase):
                     "@@ -1 +1 @@\n"
                     "+c = 1\n"
                 )
-                files = pr_analyzer.parse_diff(diff)
-                self.assertEqual([(f.filename, f.additions, f.deletions) for f in files],
-                                 [('src/app.py', 1, 1), ('src/util.py', 1, 0)])
+                with self.assertRaisesRegex(ValueError, 'Unsupported or unreadable diff'):
+                    pr_analyzer.parse_diff(diff)
 
     def test_prefix_configurations(self):
         # diff.mnemonicPrefix (i/ w/ c/ o/ 1/ 2/) and diff.noprefix change the
@@ -2584,9 +2581,8 @@ class MainTest(unittest.TestCase):
     def test_terminal_without_input_prints_usage(self):
         code, out, err = self.run_main(stdin=FakeStdin(tty=True))
         self.assertEqual(code, 1)
-        self.assertEqual(out, "Usage: git diff --no-color --default-prefix main...HEAD | "
-                              "python3 pr-analyzer.py\n"
-                              "       python3 pr-analyzer.py -f diff.txt\n")
+        self.assertEqual(out, "Usage: python3 -I pr-analyzer.py -f complete.diff [--stats]\n"
+                              "       Or supply a complete patch on stdin; see assets/review-targets.md.\n")
         self.assertEqual(err, '')
 
     def test_unreadable_file_reports_error(self):
@@ -2608,13 +2604,12 @@ class MainTest(unittest.TestCase):
     def test_input_without_files_is_an_error(self):
         # Not git diff output (or a format the parser can't read): say so instead
         # of printing an empty report that suggests nothing needs review.
-        for content in ('just some text\n', '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n',
-                        'diff --cc src/app.py\n'):
+        for content in ('just some text\n', '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n'):
             with self.subTest(content=content):
                 code, out, err = self.run_main('-f', self.write_diff(content))
                 self.assertEqual((code, out), (1, ''))
                 self.assertEqual(err, pr_analyzer.NO_FILES_MESSAGE + '\n')
-        self.assertIn('git diff --no-color --default-prefix', pr_analyzer.NO_FILES_MESSAGE)
+        self.assertIn('assets/review-targets.md', pr_analyzer.NO_FILES_MESSAGE)
 
     def test_report_is_utf8_on_a_legacy_code_page(self):
         # Windows pipes default to an ANSI code page such as cp1252, which

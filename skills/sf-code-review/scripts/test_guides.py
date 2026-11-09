@@ -169,6 +169,13 @@ class GuideStructureTest(unittest.TestCase):
 # ═══════════════════════════════════════════════════════════════
 
 class CorrectedFactsTest(GuideTestCase):
+    def test_architecture_uses_the_platform_severity_for_global_api(self):
+        platform = read('reference/salesforce/platform.md')
+        row = next(line for line in platform.splitlines() if line.startswith('| 18 |'))
+        architecture = read('reference/architecture-review-guide.md')
+        tier = row.split('|')[3].strip().split(':')[0]
+        self.assertIn('row 18 (' + tier, architecture)
+
     def test_trigger_bodies_run_in_user_mode_at_api_67(self):
         # Apex Developer Guide v67.0, "Implementation in Apex Triggers": database
         # operations within trigger bodies run in user mode unless system mode is

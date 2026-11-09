@@ -28,7 +28,7 @@
 1. Resolve exactly which change to review, and read what it claims to do.
 2. Split a large change by feature and review the slices in parallel, one fresh agent each.
 3. Run 16 review angles on every hunk, merge the candidates without dropping any, and sweep for gaps.
-4. Drop a finding only when the code refutes it; keep the rest with a confidence.
+4. Verify each claim against the pinned source. Keep supported findings and state unresolved evidence as questions.
 5. Report in a fixed format: a verdict, the scope, severity-ranked findings with `file:line`, impact, fix, and confidence, open questions, and older problems outside the change.
 
 It covers **JavaScript, TypeScript, Node.js, NestJS, Python, and the Salesforce platform**: Apex, triggers, SOQL/SOSL, Lightning Web Components, Aura, Visualforce, Flows, and metadata.
@@ -38,15 +38,15 @@ It covers **JavaScript, TypeScript, Node.js, NestJS, Python, and the Salesforce 
 ## &#10024; Key Features
 
 - **Independent by design.** The skill runs as a forked subagent (`context: fork`) that never sees the conversation that wrote the code. Where a client can't fork (Codex, a direct read of SKILL.md), the skill hands the review to a fresh agent, or says `independent: no` in the report.
-- **Recall first, then proof.** Sixteen angles (line by line, removed behavior, callers and callees, intent and parity, tests, data access, limits, async, metadata, conventions, and more) each surface candidates; none suppresses another. A gap sweep looks only for what the list lacks. Verification drops a candidate only with a quoted guard at `file:line`.
+- **Recall first, then proof.** Sixteen angles (line by line, removed behavior, callers and callees, intent and parity, tests, data access, limits, async, metadata, conventions, and more) each surface candidates; none suppresses another. A gap sweep looks only for what the list lacks. Verification records evidence for confirmation or refutation, including a wrong premise or platform behavior. Unresolved claims stay visible as questions.
 - **Scales with the change.** A small change gets one fresh agent. A large or multi-repo change is split by feature (an entry point with its callees, tests, and metadata), each slice gets its own fresh agent, and a blind verifier checks the blocking and important findings.
-- **Checklist-first loading.** Only SKILL.md (~150 lines) loads when the skill activates. Each guide opens with a review checklist that doubles as its table of contents. Claude reads the checklists first and opens only the sections the diff touches. For example, an Apex trigger review starts from about 3.7k tokens of checklists, instead of about 49k tokens for the full guides.
+- **Checklist-first loading.** SKILL.md routes the review through its safety and target guides before target content. Each guide opens with a review checklist that doubles as its table of contents. Claude reads the checklists first and opens only the sections the diff touches. For example, an Apex trigger review starts from about 3.7k tokens of checklists, instead of about 49k tokens for the full guides.
 - **An agent's procedure, not a human's.** An eight-step workflow: resolve target → gather context → plan the passes → load guides → find candidates → merge and sweep → verify → report. There are no time budgets, praise quotas, or "ask to split" steps.
-- **Fixed output format.** Every review has a verdict, a scope line (with `independent` and `parallel`), numbered findings (severity, `path:line`, the defect stated as fact, impact, fix, confidence), Questions for facts outside the repository, and Outside this change for older problems the change doesn't touch.
-- **Focused on the change.** The review reads each hunk's enclosing function or element, not the whole file, then what the angles point to: callers, mirrored code, rule files, object metadata, and the removed code. Findings cover the changed lines; an older problem is a finding, tagged "(pre-existing)", only when the change makes it reachable or worse. Anything a linter or compiler already enforces is skipped, and every absolute rule in the guides lists its legitimate exceptions.
+- **Fixed output format.** Every review has a verdict, a scope line (with `independent` and `parallel`), numbered findings (severity, `path:line`, the defect with any condition stated, impact, fix, confidence), Questions for facts outside the repository, and Outside this change for older problems the change doesn't touch.
+- **Focused on the change.** The review starts with each hunk's enclosing function or element and expands when needed, then reads what the angles point to: callers, mirrored code, rule files, object metadata, and the removed code. Findings cover the changed lines; an older problem is a finding, tagged "(pre-existing)", only when the change makes it reachable or worse. Build and security defects remain findings unless a check already reports them for the exact head, and every absolute rule in the guides lists its legitimate exceptions.
 - **Salesforce Review Path.** It detects Salesforce DX changes and routes each file type to its guide. It also traces entry points, counts governor limits at 200-record bulk volume, checks sharing and CRUD/FLS per API version, and looks for automation overlap. That includes the API 67.0 defaults, under which trigger bodies run in user mode too.
-- **Static and safe.** The skill pre-approves only read-only `git`, `gh pr`, and `gh issue view` commands and its own analyzer, with no WebFetch. Reviewed code, comments, and PR text are treated as data, never as instructions. Salesforce reviews never deploy, run Apex or tests, or read org data.
-- **Robust analyzer.** `scripts/pr-analyzer.py` still reads diffs produced under `color.ui=always`, `diff.mnemonicPrefix`, or `diff.noprefix`. It ignores lockfiles, snapshots, and minified files when it sizes a change or looks for missing tests. It also flags Salesforce risks such as renames, FlowDefinitions, and apiVersion bumps on classes and triggers.
+- **Static review with explicit boundaries.** The skill pre-approves Read, Grep, and Glob. Shell commands use the existing client permissions. [Review Safety](assets/review-safety.md) treats repository rule files, PR text, tool output, and agent reports as data. [Review Targets](assets/review-targets.md) disables diff drivers, pins source commits, and tracks coverage. Its trusted worktree reader also suppresses clean/process filters, nested submodule diffs, and optional index writes. Host permissions must enforce isolation; prompt rules are not a sandbox.
+- **Robust analyzer.** `scripts/pr-analyzer.py` still reads diffs produced under `color.ui=always`, `diff.mnemonicPrefix`, or `diff.noprefix`. It excludes generated lines from size and test ratios, while flagging the artifacts for risk review. The CLI rejects unsupported headers and incomplete hunks and escapes control characters in filenames. It also flags Salesforce risks such as renames, FlowDefinitions, and apiVersion bumps on classes and triggers.
 
 ---
 
@@ -213,13 +213,13 @@ It covers **JavaScript, TypeScript, Node.js, NestJS, Python, and the Salesforce 
 4. Load guides             each guide's Review Checklist first, then only matching sections
           |
           v
-5. Find candidates         16 angles per hunk, up to 8 candidates each; read callers, mirrored code, metadata
+5. Find candidates         16 angles per hunk, without a finding quota; read callers, mirrored code, metadata
           |
           v
 6. Merge and sweep         merge duplicates without dropping any; one pass only for what the list lacks
           |
           v
-7. Verify                  drop only with a quoted guard at file:line; blind verifier on split reviews
+7. Verify                  record confirming or refuting evidence; blind verifier on split reviews
           |
           v
 8. Report                  verdict · scope · findings (severity, file:line, impact, fix, confidence)
@@ -245,7 +245,7 @@ Salesforce changes add the **Salesforce Review Path** from `SKILL.md` and the **
 | &#128994; `nit` | Optional polish |
 | &#128161; `suggestion` | An alternative worth considering, not a defect |
 
-Verdict: any blocking finding → Request changes; otherwise any important finding → Comment; otherwise Approve. Default severities for common Salesforce findings (SOQL in loops, missing CRUD/FLS, XSS escape hatches, recursion guards, permission over-grants, and more) are in [`reference/salesforce/platform.md`](reference/salesforce/platform.md#severity-calibration).
+Verdict: a supported blocking finding means Request changes. Otherwise missing scope or required verification means Incomplete. Important findings or material questions mean Comment. Approve requires complete coverage of a nonempty target. Default severities for common Salesforce findings (SOQL in loops, missing CRUD/FLS, XSS escape hatches, recursion guards, permission over-grants, and more) are in [`reference/salesforce/platform.md`](reference/salesforce/platform.md#severity-calibration).
 
 ---
 
@@ -348,14 +348,14 @@ Once installed, ask for a review in your session:
 Use sf-code-review to review this PR
 ```
 
-Or run it as `/sf-code-review`, optionally with a target: a PR number, a branch, a commit range `base...head`, or `repo=<path>:<base>...<head>` pairs for a change across several repositories, plus an issue key or a spec path. In Claude Code the review runs in a forked agent and its report comes back to your conversation; relay it as it is.
+Or run it as `/sf-code-review`, optionally with a target: a PR number, a branch, a commit range `base...head`, or `repo=<path>:<base>...<head>` pairs for a change across several repositories, plus an issue key or a spec path. In Claude Code the review runs in a forked agent and its report comes back to your conversation; validate its evidence and safety before relaying it.
 
 **Example prompts:**
 
 | Prompt | What happens |
 |--------|-------------|
 | `Use sf-code-review to review PR 42` | `gh pr view` / `gh pr diff`, the linked issue, then the matching guides and the output format |
-| `Review my uncommitted changes` | `git diff HEAD` plus untracked files from `git status --porcelain` |
+| `Review my uncommitted changes` | Safe diff against `HEAD` and the full untracked-file inventory from Review Targets |
 | `/sf-code-review repo=~/src/crm:main...feature/orders repo=~/src/crm-eu:main...feature/orders` | one review across two repositories, split by feature, one fresh agent per slice |
 | `Review this Apex trigger` | platform.md + apex-triggers.md + apex.md checklists: one trigger per object, 200-record chunks, recursion, user mode at API 67.0+ |
 | `Review this Lightning Web Component` | lwc.md + javascript.md: reactivity, LDS/wire, the Apex contract, XSS, cleanup |
@@ -367,10 +367,11 @@ Or run it as `/sf-code-review`, optionally with a target: a PR number, a branch,
 
 A review across several repositories reads files outside the working directory: start Claude Code with `--add-dir <path>` for each other repository, or approve the reads when asked.
 
-For large diffs, the bundled analyzer triages size and risk and prints which guides to load (run it from the skill folder):
+For large diffs, the bundled analyzer triages size and risk and prints which guides to load. Collect from the target repository with the safeguards in Review Targets, then pass the successful complete patch to the trusted analyzer. This example assumes the repository has `main` and the helper path points to the trusted skill:
 
 ```bash
-git diff --no-color --default-prefix main...HEAD | python3 scripts/pr-analyzer.py
+set -o pipefail
+git --no-pager -c core.fsmonitor=false -c core.hooksPath=/dev/null --literal-pathspecs diff --no-color --default-prefix --no-ext-diff --no-textconv --submodule=short main...HEAD | python3 -I /absolute/path/to/sf-code-review/scripts/pr-analyzer.py
 ```
 
 ---

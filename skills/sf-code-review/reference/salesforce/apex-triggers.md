@@ -231,7 +231,7 @@ The handler's own DML, workflow field updates, after-save flows, roll-ups, and t
 
 ### Guard per record and operation, never with a static Boolean
 
-A static "already ran" Boolean is set by the first chunk, so chunks 2..n of the same DML, and every later DML on the object, skip the logic: records 201 and up of a load silently miss the automation. Prefer change detection; where your own writes re-enter the trigger, remember the Ids handled for each operation (before insert has no Ids yet, so it relies on change detection). A purpose-named flag that only prevents a second side effect, such as the one guarded enqueue above, is fine.
+A static "already ran" Boolean is set by the first chunk, so chunks 2..n of the same DML, and every later DML on the object, skip the logic: records 201 and up of a load silently miss the automation. Prefer field-change detection and writes that stop when the stored value meets the required state. A transaction-wide set of handled Ids also skips later legitimate updates and partial-success retries. If an active-call guard is needed, scope it to the recursive call and clear it in `finally`; test any new state that arrives during that call. Before insert has no Ids yet. A purpose-named flag that only prevents a second side effect, such as the one guarded enqueue above, is fine.
 
 ```apex
 // ❌ Chunk 1 sets the flag; records 201+ are never processed
@@ -241,35 +241,16 @@ public void run() {
     hasRun = true;
 }
 
-// ✅ Each record is handled once per operation, in every chunk
-public inherited sharing class TriggerRecursion {
-    private static Map<TriggerOperation, Set<Id>> handled = new Map<TriggerOperation, Set<Id>>();
-    public static Set<Id> firstVisits(List<SObject> records) {
-        if (!handled.containsKey(Trigger.operationType)) {
-            handled.put(Trigger.operationType, new Set<Id>());
-        }
-        Set<Id> seen = handled.get(Trigger.operationType);
-        Set<Id> fresh = new Set<Id>();
-        for (SObject record : records) {
-            if (seen.add(record.Id)) {
-                fresh.add(record.Id);
-            }
-        }
-        return fresh;
-    }
-}
-// ⚠️ Statics survive the partial-success retry (allOrNone = false, API loads): the first attempt's work is
-//    rolled back but its Ids stay handled. Keep guarded work idempotent and test that path.
 ```
 
 ### Expect re-entry from other automation
 
-A workflow field update re-runs before and after update triggers once more, and in that re-run `Trigger.old` still holds the values from before the original update, so change detection sees the same change twice and only an Id guard stops it. After-save flows that update the triggering record, roll-up summaries and cross-object workflow that save the parent, and the handler's own after-trigger DML re-enter too: list every automation that writes the object before approving recursion logic.
+A workflow field update re-runs before and after update triggers once more, and in that re-run `Trigger.old` still holds the values from before the original update, so an old/new comparison alone can see the same change twice. Check the current required state before writing again; do not use a permanent handled-Id set as a general guard. After-save flows that update the triggering record, roll-up summaries and cross-object workflow that save the parent, and the handler's own after-trigger DML re-enter too: list every automation that writes the object before approving recursion logic.
 
 ```text
 ❌ Account after update -> updates Contacts -> Contact trigger updates the Account -> Account after update -> ...
 ❌ Invoice insert -> the roll-up summary saves the Account -> Account triggers and flows run inside the Invoice DML
-✅ Every writer of the object is known, each write needs a real change, and an Id guard covers workflow re-fires
+✅ Every writer is known; repeated, partial-success, and second-chunk execution converge without losing work
 ```
 
 ---

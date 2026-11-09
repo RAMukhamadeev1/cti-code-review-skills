@@ -3,6 +3,9 @@
 ## Session
 
 - 2599b81e-cb69-4036-868d-e864b95760f0
+- Unavailable
+
+The sections below record the original isolation change. The later [security hardening](SfCodeReviewSecurityHardening.md) supersedes the original wildcard tool grants, rule-file trust, generated-file exclusions, guard-only verification, and approval rules. It also records the current tests and remaining limits.
 
 ## Original task summary
 

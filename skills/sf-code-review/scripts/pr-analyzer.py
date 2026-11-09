@@ -1,28 +1,20 @@
 #!/usr/bin/env python3
 """
-PR Analyzer - Analyze PR complexity and suggest a review approach.
-
-The analysis is name-based: it parses only the diff text it is given and
-never reads repository files. It recognizes JavaScript/TypeScript, Node.js,
-NestJS, and Python code, and Salesforce DX projects (Apex, triggers, SOQL,
-LWC, Aura, Visualforce, flows, and metadata, in source format or the legacy
-MDAPI layout). Salesforce changes get platform-specific risk factors, and the
-suggestions end with the reference guides to load for the diff. Lockfiles,
-snapshots, and minified files don't count toward size or test risks.
+Analyze a complete unified patch for review size, risks, and guide routing.
+Read only supplied text; use assets/review-targets.md to collect it safely.
+Generated lines affect risk review but not size or test ratios.
 
 Usage:
-    python3 pr-analyzer.py [--diff-file FILE] [--stats]
-
-    Or pipe a diff directly (--no-color and --default-prefix undo user settings
-    such as color.ui=always and diff.mnemonicPrefix; the parser copes with them
-    anyway):
-    git diff --no-color --default-prefix main...HEAD | python3 pr-analyzer.py
+    python3 -I pr-analyzer.py [--diff-file FILE] [--stats]
+    Or provide a complete patch on stdin after collection succeeds.
 """
 
 import os
 import sys
 import re
 import argparse
+import json
+import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Optional
@@ -31,9 +23,10 @@ RISK_NO_TESTS = "NO_TEST_CHANGES"
 RISK_APEX_NO_TESTS = "APEX_NO_TEST_CHANGES"
 
 NO_FILES_MESSAGE = (
-    "No files found in the input. Pass unified git diff output, for example: "
-    "git diff --no-color --default-prefix main...HEAD | python3 pr-analyzer.py"
+    "No files found in the input. Supply a complete unified git diff; "
+    "see assets/review-targets.md for safe collection."
 )
+UNREADABLE_DIFF_MESSAGE = 'Unsupported or unreadable diff; obtain a complete unified patch.'
 
 # Apex saved at this API version or later is secure by default: a class with
 # no sharing keyword runs 'with sharing' (unless a parent class declares a
@@ -250,6 +243,8 @@ _MNEMONIC_HEADER_RE = re.compile(r'diff --git ([icwo12])/(.+?) ([icwo12])/\2$')
 _SAME_PATH_HEADER_RE = re.compile(r'diff --git (.+?) \1$')
 _QUOTED_PAIR_HEADER_RE = re.compile(r'diff --git ("(?:[^"\\]|\\.)*") ("(?:[^"\\]|\\.)*")$')
 _NEW_PATH_LINES = ('rename to ', 'copy to ')
+_SPECIAL_MODE_RE = re.compile(r'^(?:new file mode|deleted file mode|old mode|new mode|index) .*\b(?:120000|160000)\b')
+_HUNK_HEADER_RE = re.compile(r'^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@(?:.*)$')
 
 # Git C-quotes a diff header path that has special characters, including
 # non-ASCII names under the default core.quotePath: "b/caf\303\251.md"
@@ -341,6 +336,7 @@ class FileStats:
     has_soql: bool = False  # Apex source with SOQL/SOSL in an added line
     uses_node: bool = False  # JS/TS with a Node.js import or process usage in an added line
     uses_nest: bool = False  # JS/TS with a NestJS import or decorator in an added line
+    non_text: bool = False
 
 
 @dataclass
@@ -650,6 +646,13 @@ def _new_path(line: str) -> str:
     return _unquote_c_style(path) if path.startswith('"') else path
 
 
+def _display_path(path: str) -> str:
+    """Keep a path on one visible line without terminal or direction controls."""
+    if any(unicodedata.category(char) in ('Cc', 'Cf', 'Zl', 'Zp') for char in path):
+        return json.dumps(path, ensure_ascii=True)
+    return path
+
+
 def _classify(stats: FileStats, filename: str) -> FileStats:
     """Set the file name and everything derived from it."""
     stats.filename = filename
@@ -688,8 +691,11 @@ def parse_diff(diff_content: str) -> List[FileStats]:
     for line in diff_content.split('\n'):
         if '\x1b' in line:
             line = _ANSI_ESCAPE_RE.sub('', line)
-        # New file header
+        if line.startswith(('diff --cc ', 'diff --combined ', '@@@')):
+            raise ValueError(UNREADABLE_DIFF_MESSAGE)
         if line.startswith('diff --git'):
+            if awaiting_path:
+                raise ValueError(UNREADABLE_DIFF_MESSAGE)
             if current_file:
                 files.append(current_file)
             in_hunk = bracket_open = False
@@ -711,6 +717,9 @@ def parse_diff(diff_content: str) -> List[FileStats]:
             continue
         if not current_file:
             continue
+        if not in_hunk and (line.startswith(('Binary files ', 'GIT binary patch'))
+                            or _SPECIAL_MODE_RE.match(line)):
+            current_file.non_text = True
         if line.startswith('@@'):
             in_hunk = True
         elif not in_hunk and line.startswith('new file mode'):
@@ -747,6 +756,8 @@ def parse_diff(diff_content: str) -> List[FileStats]:
             bracket_open = _update_bracket(bracket_open, line[1:])
             _mark_apex_test(current_file, line[1:])
 
+    if awaiting_path:
+        raise ValueError(UNREADABLE_DIFF_MESSAGE)
     if current_file:
         files.append(current_file)
 
@@ -763,6 +774,39 @@ def _mark_apex_test(stats: FileStats, content: str) -> None:
     """An @isTest annotation makes the class a test class, whatever its name."""
     if not stats.is_test and _APEX_TEST_ANNOTATION_RE.search(content):
         stats.is_test = True
+
+
+def validate_hunks(diff_content: str) -> None:
+    """Reject truncated or malformed unified hunks before printing a CLI report."""
+    old_left = new_left = 0
+    in_file = in_hunk = False
+    awaiting_hunk = False
+    error = 'Incomplete or invalid hunk; obtain a complete unified patch.'
+    for raw in diff_content.split('\n'):
+        line = _ANSI_ESCAPE_RE.sub('', raw).rstrip('\r')
+        if line.startswith('diff --git'):
+            if old_left or new_left or awaiting_hunk:
+                raise ValueError(error)
+            in_file, in_hunk = True, False
+        elif in_file and not in_hunk and line.startswith(('--- ', '+++ ')):
+            awaiting_hunk = True
+        elif in_file and line.startswith('@@'):
+            match = _HUNK_HEADER_RE.match(line)
+            if not match or old_left or new_left:
+                raise ValueError(error)
+            old_left, new_left = (int(count) if count is not None else 1
+                                  for count in match.groups())
+            in_hunk = True
+            awaiting_hunk = False
+        elif in_hunk and line.startswith((' ', '+', '-')):
+            old_left -= line[0] in (' ', '-')
+            new_left -= line[0] in (' ', '+')
+            if old_left < 0 or new_left < 0:
+                raise ValueError(error)
+        elif in_hunk and line and not line.startswith('\\ No newline at end of file'):
+            raise ValueError(error)
+    if old_left or new_left or awaiting_hunk:
+        raise ValueError(error)
 
 
 def reviewable_changes(files: List[FileStats]) -> int:
@@ -1012,7 +1056,7 @@ def identify_risk_factors(files: List[FileStats]) -> List[str]:
     # and generated files don't need tests, and deleted code needs none.
     code_changes = sum(f.additions + f.deletions for f in files if _is_testable_code(f))
     test_changes = sum(f.additions + f.deletions for f in files
-                       if f.is_test and not f.is_generated)
+                       if f.is_test and not f.is_generated and f.change_type != CHANGE_DELETED)
 
     if test_changes == 0 and code_changes > 50:
         risks.append(f"{RISK_NO_TESTS}: No test changes - verify test coverage")
@@ -1023,7 +1067,7 @@ def identify_risk_factors(files: List[FileStats]) -> List[str]:
     # Security-sensitive files
     for f in files:
         if is_security_sensitive(f.filename):
-            risks.append(f"Security-sensitive file: {f.filename}")
+            risks.append(f"Security-sensitive file: {_display_path(f.filename)}")
             break
 
     # Database changes
@@ -1036,6 +1080,14 @@ def identify_risk_factors(files: List[FileStats]) -> List[str]:
     config_files = [f for f in files if f.is_config]
     if config_files:
         risks.append(f"Configuration changes in {len(config_files)} file(s)")
+
+    if any(f.is_generated for f in files):
+        risks.append('Generated artifact changed - inspect dependency sources, integrity, '
+                     'install behavior, snapshot expectations, and source-to-bundle parity')
+    for f in files:
+        if f.non_text:
+            risks.append(f'Non-text change: {_display_path(f.filename)} - inspect binary, '
+                         'symlink, or submodule metadata without following external targets')
 
     risks.extend(_salesforce_risks(files))
 
@@ -1256,7 +1308,7 @@ def print_analysis(analysis: PRAnalysis, show_files: bool = False):
             print(f"\n   [{lang}]")
             for f in lang_files:
                 prefix = "🧪" if f.is_test else "⚙️" if f.is_config else "📄"
-                print(f"   {prefix} {f.filename} (+{f.additions}/-{f.deletions})")
+                print(f"   {prefix} {_display_path(f.filename)} (+{f.additions}/-{f.deletions})")
 
     print("\n" + "=" * 60)
 
@@ -1275,18 +1327,23 @@ def main():
         elif not sys.stdin.isatty():
             diff_content = sys.stdin.buffer.read().decode('utf-8', errors='replace')
         else:
-            print("Usage: git diff --no-color --default-prefix main...HEAD | python3 pr-analyzer.py")
-            print("       python3 pr-analyzer.py -f diff.txt")
+            print("Usage: python3 -I pr-analyzer.py -f complete.diff [--stats]")
+            print("       Or supply a complete patch on stdin; see assets/review-targets.md.")
             sys.exit(1)
     except OSError as e:
-        print(f"Error reading diff input: {e}", file=sys.stderr)
+        print(f"Error reading diff input: {_display_path(str(e))}", file=sys.stderr)
         sys.exit(1)
 
     if not diff_content.strip():
         print("No diff content provided")
         sys.exit(1)
 
-    analysis = analyze_pr(diff_content)
+    try:
+        analysis = analyze_pr(diff_content)
+        validate_hunks(diff_content)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        sys.exit(1)
     if not analysis.files:
         # Not git diff output: an empty report would read as "nothing to review"
         print(NO_FILES_MESSAGE, file=sys.stderr)

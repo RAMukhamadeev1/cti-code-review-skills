@@ -425,11 +425,11 @@ if (setting?.Review_Threshold__c == null) {
 
 ## Tooling
 
-Static analysis output is input to the review, not a verdict: confirm each hit in the code and calibrate it with [Severity Calibration](#severity-calibration). Findings a configured linter already enforces in CI aren't review findings.
+Static analysis output is input to the review, not a verdict: confirm each hit in the code and calibrate it with [Severity Calibration](#severity-calibration). Avoid duplicate findings only when an enforced check reports the same defect for the exact reviewed head. A configured tool alone does not prove that the check ran.
 
-### Run Salesforce Code Analyzer on local paths
+### Read Salesforce Code Analyzer results
 
-Code Analyzer is optional local analysis: use it only when it is already installed, and install nothing without asking. Code Analyzer v5 (`sf code-analyzer`) replaced v4 (`sf scanner`, retired in August 2025); a CI script or README still calling `sf scanner` is out of date.
+The author or CI can provide Code Analyzer output tied to the reviewed commit. Reviewers do not run it in this static workflow. The following constraints apply when assessing the supplied command and configuration. Code Analyzer v5 (`sf code-analyzer`) replaced v4 (`sf scanner`, retired in August 2025); a CI script or README still calling `sf scanner` is out of date.
 
 - Scan only local paths, with selectors that stay on local engines: `Recommended` (the default), `Security`, or an engine- or rule-scoped selector such as `flow` or `pmd:ApexSOQLInjection`.
 - Never pass `--target-org`, and never select `all`, `apexguru`, or a severity-only selector such as `2` or `High`: those pull in ApexGuru rules, and the ApexGuru engine connects to an org, falling back to the CLI's default org when no `--target-org` is given. ApexGuru rules carry only the `apex-guru` tag, so `Recommended` and `Security` never select them.
@@ -454,7 +454,7 @@ Before assigning a tier:
 - Judge sharing and CRUD/FLS against the file's effective defaults ([Security Model](#security-model)): the class's keyword, else its parent's, else its apiVersion.
 - Review the change. Pre-existing code isn't a finding unless the change makes it worse or newly reachable.
 - House conventions (a trigger framework, fflib layers, `Assert` over `System.assert*`) apply only when the repo already follows them.
-- Items a configured linter or formatter enforces aren't findings.
+- Skip routine formatting noise. Keep build and security defects unless the same defect is already reported by an enforced check on this head.
 - A finding that needs org evidence (coverage, data volumes, reachability metadata outside the repo) is a question to the author until the evidence arrives.
 
 | # | Finding | Default | Adjust |

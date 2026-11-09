@@ -40,7 +40,7 @@ Read this checklist first; open a section only when the diff contains its patter
 
 ### Severity → [Severity Calibration](salesforce/platform.md#severity-calibration)
 
-- [ ] Salesforce findings take the tier of the calibration row that covers them, adjusted as that table says: logic in a trigger body or a second trigger is row 15 (🟡), hard-coded Ids, URLs, and usernames row 13 (🟡; 🔴 in authorization logic), a new released `global` member row 18 (🔴), a secret row 8 (🔴).
+- [ ] Salesforce findings take the tier of the calibration row that covers them, adjusted as that table says: logic in a trigger body or a second trigger is row 15 (🟡), hard-coded Ids, URLs, and usernames row 13 (🟡; 🔴 in authorization logic), a new released `global` member row 18 (🟡; 🔴 for exposed internals or unsafe operations), a secret row 8 (🔴).
 - [ ] Elsewhere: 🔴 for a broken public contract or a secret in code; 🟡 for structure that will cost the next change (a new import cycle, core code importing infrastructure, a second owner for a field); 🟢 or 💡 for the rest.
 
 ---

@@ -352,26 +352,8 @@ class FrontmatterTest(unittest.TestCase):
         for phrase in ('mentoring', 'never deploy', 'setting review standards'):
             self.assertNotIn(phrase, description)
 
-    def test_allowed_tools_are_read_only(self):
-        # Static review only: read-only tools, read-only git and gh, and the
-        # bundled analyzer; never sf/sfdx, a general shell, or unscoped WebFetch
-        # (reviewed code is untrusted input, so no pre-approved exfiltration path).
-        # "git -C <repo>" reads a second repository of a multi-repo review.
-        allowed = self.fields['allowed-tools']
-        analyzer = 'Bash(python3 ${CLAUDE_SKILL_DIR}/scripts/pr-analyzer.py *)'
-        for required in (analyzer, 'Bash(gh pr view *)', 'Bash(gh pr diff *)',
-                         'Bash(git merge-base *)', 'Bash(git -C * diff *)',
-                         'Bash(git -C * show *)', 'Bash(gh issue view *)'):
-            self.assertIn(required, allowed)
-        for tool in allowed:
-            with self.subTest(tool=tool):
-                self.assertTrue(
-                    tool in {'Read', 'Grep', 'Glob', analyzer}
-                    or re.fullmatch(r'Bash\(git (?:-C \* )?(?:diff|log|show|status|merge-base'
-                                    r'|rev-parse|blame|ls-files) \*\)', tool)
-                    or re.fullmatch(r'Bash\(gh (?:pr (?:view|diff|checks)|issue view) \*\)', tool),
-                    tool)
-                self.assertFalse(tool.startswith('WebFetch'), tool)
+    def test_allowed_tools_do_not_grant_arbitrary_shell_options(self):
+        self.assertEqual(set(self.fields['allowed-tools']), {'Read', 'Grep', 'Glob'})
 
     def test_skill_dir_paths_exist(self):
         paths = set(re.findall(r'\$\{CLAUDE_SKILL_DIR\}/([\w./-]+)', read(SKILL_MD)))
@@ -427,7 +409,7 @@ class SkillBodyTest(unittest.TestCase):
     def test_independence_rule(self):
         rule = self.line_starting('- **Independent.**')
         for phrase in ('began with this skill', 'You are the delegate; do not delegate.',
-                       'fresh agent', 'unchanged', '`independent: no`'):
+                       'fresh agent', 'validate its evidence', '`independent: no`'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, rule)
 
@@ -439,14 +421,15 @@ class SkillBodyTest(unittest.TestCase):
         self.assertIn('Never read agent session transcripts (`*.jsonl`).', rule)
 
     def test_empty_target_stops(self):
-        rule = self.line_starting('- No target given:')
-        self.assertIn('`No target: nothing to review`', rule)
-        self.assertIn('Never approve an empty diff.', rule)
+        targets = read(os.path.join(SKILL_ROOT, 'assets/review-targets.md'))
+        self.assertIn('`No target: nothing to review`', targets)
+        self.assertIn('Never approve an empty diff.', targets)
 
     def test_multi_repo_and_commit_range_targets(self):
-        self.assertIn('`repo=<path>:<base>...<head>`', self.line_starting('- Several repositories:'))
-        self.assertIn('`git diff --no-color --default-prefix <from> <to>`',
-                      self.line_starting('- Commit range:'))
+        targets = read(os.path.join(SKILL_ROOT, 'assets/review-targets.md'))
+        self.assertIn('`repo=<path>:<base>...<head>`', targets)
+        self.assertIn('`<from> <to>` for endpoint comparison', targets)
+        self.assertIn('preserve that choice', targets)
 
     def test_context_includes_the_governing_rules(self):
         step = self.line_starting('2. **Gather context.**')
@@ -486,20 +469,19 @@ class SkillBodyTest(unittest.TestCase):
         self.assertRegex(step, r'(?i)contracts between slices')
         self.assertRegex(step, r'(?i)zero new findings is a valid result')
 
-    def test_verification_drops_only_with_a_quoted_guard(self):
-        self.assertNotIn("Drop what doesn't hold", self.text)
+    def test_verification_allows_evidence_that_refutes_a_premise(self):
         step = self.line_starting('7. **Verify each candidate finding**')
-        self.assertRegex(step, r'(?i)drop a candidate only when you can quote')
-        self.assertIn('`file:line`', step)
-        self.assertIn('`Confidence: high`', step)
+        for evidence in ('guard', 'unreachable path', 'wrong premise', 'platform behavior'):
+            self.assertIn(evidence, step)
         for verdict in ('CONFIRMED', 'REFUTED', 'UNDECIDABLE', 'blind'):
-            with self.subTest(verdict=verdict):
-                self.assertIn(verdict, step)
+            self.assertIn(verdict, step)
+        self.assertIn('record the evidence before dropping', step)
 
-    def test_questions_only_for_facts_outside_the_repo(self):
+    def test_uncertain_claims_are_not_reported_as_facts(self):
         step = self.line_starting('7. **Verify each candidate finding**')
-        self.assertRegex(step, r'(?i)under Questions only when the deciding fact lives '
-                               r'outside the repository')
+        self.assertIn('conditional wording', step)
+        self.assertIn('inside or outside the repository', step)
+        self.assertIn('Missing evidence is not proof', step)
 
     def test_soft_floor_reruns_sweep_once(self):
         step = self.line_starting('8. **Report**')
@@ -517,7 +499,7 @@ class SkillBodyTest(unittest.TestCase):
 
     def test_output_has_confidence_independence_coverage(self):
         body = self.text.split('## Output Format', 1)[1].split('\n## ', 1)[0]
-        for marker in ('Independent review from a separate agent. Relay it unchanged.',
+        for marker in ('coverage: complete',
                        'independent: yes | no', 'parallel: yes | no', 'not reviewed:',
                        'Confidence: high | medium', '### Outside this change',
                        'Outside this change never changes the verdict'):
@@ -542,17 +524,14 @@ class SkillBodyTest(unittest.TestCase):
                 self.assertNotRegex(self.text, pattern)
 
     def test_diff_commands_survive_user_git_config(self):
-        # color.ui=always and diff.mnemonicPrefix/noprefix change what git prints
-        commands = re.findall(r'`(git diff [^`]*)`', self.text)
-        self.assertTrue(any('| python3 ${CLAUDE_SKILL_DIR}/scripts/pr-analyzer.py' in c
-                            for c in commands), commands)
+        targets = read(os.path.join(SKILL_ROOT, 'assets/review-targets.md'))
+        commands = re.findall(r'`(git [^`]*diff --no-color[^`]*)`', targets)
+        self.assertTrue(commands)
         for command in commands:
-            with self.subTest(command=command):
-                self.assertIn('--no-color', command)
-                self.assertIn('--default-prefix', command)
-        # Uncommitted work: tracked changes against HEAD, and untracked files
-        self.assertIn('`git diff --no-color --default-prefix HEAD`', self.text)
-        self.assertIn('git status --porcelain', self.text)
+            for flag in ('--no-pager', '--no-color', '--default-prefix', '--no-ext-diff',
+                         '--no-textconv', '--literal-pathspecs', 'core.fsmonitor=false'):
+                self.assertIn(flag, command)
+        self.assertIn('python3 -I ${CLAUDE_SKILL_DIR}/scripts/pr-analyzer.py', self.text)
 
     def line_starting(self, prefix):
         """The one SKILL.md line that starts with prefix, leading spaces ignored."""
@@ -572,18 +551,14 @@ class SkillBodyTest(unittest.TestCase):
         self.assertRegex(rule, r'(?i)never scan unchanged files')
 
     def test_s2_branch_diffs_use_three_dots(self):
-        # Two dots also show what the target gained since the fork, reversed.
-        for command in re.findall(r'`(git diff [^`]*)`', self.text):
-            with self.subTest(command=command):
-                self.assertNotRegex(command, r'(?<!\.)\.\.(?!\.)')
-        branch = self.line_starting('- Branch:')
-        self.assertIn('`git diff --no-color --default-prefix <base>...HEAD`', branch)
-        self.assertIn('`origin/<target>...origin/<source>`', branch)
+        targets = read(os.path.join(SKILL_ROOT, 'assets/review-targets.md'))
+        self.assertIn('<base>...<head>', targets)
+        self.assertIn('Three dots compare the merge base with head', targets)
 
     def test_s2_review_reads_a_line_range_per_hunk(self):
         review = self.line_starting('5. **Find candidates**')
         self.assertRegex(review, r'(?i)enclosing function or block.{0,40}line range')
-        self.assertRegex(review, r'(?i)never the whole file')
+        self.assertIn('whole file when needed', review)
         self.assertRegex(review, r'(?i)Flow, LWC, Aura.{0,60}element around the hunk')
 
     def test_review_step_traces_callers_and_mirrors(self):
@@ -592,21 +567,22 @@ class SkillBodyTest(unittest.TestCase):
         self.assertNotIn('Follow callers only when', self.text)
         review = self.line_starting('5. **Find candidates**')
         for phrase in ('callers and callees', 'mirrors or claims parity with',
-                       'sibling branches', 'CLAUDE.md', 'OWD', '`git show <base>:<path>`',
-                       '(assets/review-angles.md)', 'up to 8 each'):
+                       'sibling branches', 'CLAUDE.md', 'OWD', 'pinned base',
+                       '(assets/review-angles.md)', 'without a finding quota'):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, review)
 
     def test_s3_renamed_files_are_diffed_with_both_paths(self):
-        rename = self.line_starting('- A renamed or moved file')
-        self.assertIn('both paths', rename)
-        self.assertRegex(rename, r'(?i)only its changed lines')
+        targets = read(os.path.join(SKILL_ROOT, 'assets/review-targets.md'))
+        self.assertIn('both old and new paths', targets)
+        self.assertIn('-- <old> <new>', targets)
 
-    def test_s4_formatting_rewrites_are_read_without_whitespace(self):
-        rewrite = self.line_starting('- A file whose diff rewrites most lines')
-        self.assertIn('-w --ignore-cr-at-eol', rewrite)
-        self.assertRegex(rewrite, r'(?i)line endings')
-        self.assertRegex(rewrite, r'(?i)under Scope.{0,40}formatting')
+    def test_whitespace_view_cannot_remove_hunks_from_coverage(self):
+        targets = read(os.path.join(SKILL_ROOT, 'assets/review-targets.md'))
+        self.assertIn('exact same endpoints and pathspec', targets)
+        self.assertIn('Never use it to exclude hunks', targets)
+        for language in ('Python', 'YAML', 'strings'):
+            self.assertIn(language, targets)
 
     def test_guides_are_read_checklist_first(self):
         self.assertRegex(self.text, r'(?i)review checklist.{0,120}first')
@@ -615,7 +591,7 @@ class SkillBodyTest(unittest.TestCase):
         template = read(PR_TEMPLATE)
         for marker in ('**Verdict:**', '**Scope:**', '### Findings', '### Questions',
                        '### Outside this change', 'Confidence:', 'independent: yes',
-                       'Independent review from a separate agent. Relay it unchanged.'):
+                       'coverage: complete'):
             with self.subTest(marker=marker):
                 self.assertIn(marker, template)
         for gone in ('Review Time', '## Strengths', '- [ ]'):
